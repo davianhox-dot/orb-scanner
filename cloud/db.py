@@ -10,7 +10,7 @@ Postgres-specific beyond the URL you provide.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from cloud.config import Settings
@@ -91,6 +91,66 @@ class WatchlistItem(Base):
     ticker: Mapped[str] = mapped_column(String(10), unique=True, index=True)
     note: Mapped[str] = mapped_column(Text, default="")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class HistoricalBar(Base):
+    """Cached OHLCV bar — either 1-minute (day-trading backtests) or 1-day
+    (swing-trading backtests), distinguished by `timeframe`. Backtests read
+    from here first and only hit Polygon for date ranges that aren't
+    already cached — see cloud/historical_data.py."""
+
+    __tablename__ = "historical_bars"
+    __table_args__ = (
+        UniqueConstraint("ticker", "timestamp", "timeframe", name="uq_historical_bar_ticker_ts_tf"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ticker: Mapped[str] = mapped_column(String(10), index=True)
+    timeframe: Mapped[str] = mapped_column(String(10), default="minute", index=True)  # "minute" | "day"
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)  # UTC
+    open: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume: Mapped[int] = mapped_column(Integer)
+
+
+class BacktestRun(Base):
+    """One backtest execution: the strategy config used + the resulting
+    summary metrics. Individual trades live in BacktestTrade."""
+
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    strategy_name: Mapped[str] = mapped_column(String(64), default="Opening Range Breakout")
+    tickers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    start_date: Mapped[str] = mapped_column(String(10))
+    end_date: Mapped[str] = mapped_column(String(10))
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    trades: Mapped[list["BacktestTrade"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class BacktestTrade(Base):
+    __tablename__ = "backtest_trades"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("backtest_runs.id", ondelete="CASCADE"))
+    run: Mapped["BacktestRun"] = relationship(back_populates="trades")
+
+    ticker: Mapped[str] = mapped_column(String(10))
+    entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    entry_price: Mapped[float] = mapped_column(Float)
+    exit_price: Mapped[float] = mapped_column(Float)
+    stop_price: Mapped[float] = mapped_column(Float)
+    target_price: Mapped[float] = mapped_column(Float)
+    shares: Mapped[float] = mapped_column(Float)
+    pnl: Mapped[float] = mapped_column(Float)
+    r_multiple: Mapped[float] = mapped_column(Float)
+    exit_reason: Mapped[str] = mapped_column(String(32))
 
 
 def get_engine(settings: Settings):
