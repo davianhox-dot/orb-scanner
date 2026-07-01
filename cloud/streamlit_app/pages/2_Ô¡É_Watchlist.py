@@ -40,7 +40,7 @@ with st.form("add_ticker", clear_on_submit=True):
     col1, col2, col3 = st.columns([1, 2, 1])
     ticker_input = col1.text_input("Ticker").strip().upper()
     note_input = col2.text_input("Note (optional)")
-    submitted = col3.form_submit_button("Add", use_container_width=True)
+    submitted = col3.form_submit_button("Add", width='stretch')
 
     if submitted:
         if not ticker_input:
