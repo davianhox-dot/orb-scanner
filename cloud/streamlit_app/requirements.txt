@@ -1,5 +1,5 @@
-streamlit==1.38.0
-pandas==2.2.2
+streamlit==1.58.0
+pandas==3.0.3
 SQLAlchemy==2.0.35
 psycopg2-binary==2.9.12
 httpx==0.27.2
