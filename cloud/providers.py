@@ -140,6 +140,14 @@ class PolygonProvider(DataProvider):
 
         s = self.settings
         survivors = []
+        stats = {
+            "total": len(tickers),
+            "no_price_or_prevclose": 0,
+            "price_out_of_range": 0,
+            "gap_too_small": 0,
+            "volume_too_low": 0,
+            "passed": 0,
+        }
         for t in tickers:
             price = (t.get("day") or {}).get("c") or (t.get("min") or {}).get("c") or 0
             prev_close = (t.get("prevDay") or {}).get("c") or 0
@@ -147,14 +155,27 @@ class PolygonProvider(DataProvider):
             volume_so_far = (t.get("day") or {}).get("v") or 0
 
             if not price or not prev_close:
+                stats["no_price_or_prevclose"] += 1
                 continue
             if not (s.MIN_PRICE <= price <= s.MAX_PRICE):
+                stats["price_out_of_range"] += 1
                 continue
             if change_pct < s.MIN_GAP_PCT:
+                stats["gap_too_small"] += 1
                 continue
             if volume_so_far < s.MIN_PREMARKET_VOLUME * 0.1:
+                stats["volume_too_low"] += 1
                 continue
+
+            stats["passed"] += 1
             survivors.append(t)
+
+        logger.info(
+            "Cheap pass breakdown: total=%(total)d no_price_or_prevclose=%(no_price_or_prevclose)d "
+            "price_out_of_range=%(price_out_of_range)d gap_too_small=%(gap_too_small)d "
+            "volume_too_low=%(volume_too_low)d passed=%(passed)d",
+            stats,
+        )
         return survivors
 
     def _enrich_pass(self, client: httpx.Client, candidates: list[dict]) -> list[TickerSnapshot]:
