@@ -153,6 +153,21 @@ class BacktestTrade(Base):
     exit_reason: Mapped[str] = mapped_column(String(32))
 
 
+class SavedStrategy(Base):
+    """A user-built strategy from the Strategy Builder page — the whole
+    StrategyConfig (entry conditions, trend filters, exit rules, position
+    sizing) serialized as JSON so it can be reloaded and re-run without
+    rebuilding it from scratch."""
+
+    __tablename__ = "saved_strategies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 def get_engine(settings: Settings):
     # Supabase/Neon connection strings come as "postgresql://..." which
     # SQLAlchemy + psycopg2 handle natively — no URL rewriting needed.
