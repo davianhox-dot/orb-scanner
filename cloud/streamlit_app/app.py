@@ -67,7 +67,7 @@ st.caption("Pre-market momentum scanner — ORB, First Pullback, VWAP & Momentum
 
 header_left, header_right = st.columns([3, 1])
 with header_right:
-    if st.button("🔄 Run Scan Now", use_container_width=True):
+    if st.button("🔄 Run Scan Now", width='stretch'):
         with st.spinner("Scanning…"):
             run_scan_now(force=True)
         st.rerun()
@@ -129,7 +129,7 @@ else:
 
         st.dataframe(
             df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             height=min(600, 46 + 36 * len(df)),
             column_config={
