@@ -168,6 +168,24 @@ class SavedStrategy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class OptimizationRun(Base):
+    """One optimizer execution: the base strategy, which parameters were
+    varied over which values, and the full ranked results grid."""
+
+    __tablename__ = "optimization_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    strategy_name: Mapped[str] = mapped_column(String(128), default="Custom Strategy")
+    tickers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    start_date: Mapped[str] = mapped_column(String(10))
+    end_date: Mapped[str] = mapped_column(String(10))
+    base_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    param_specs: Mapped[list] = mapped_column(JSON, default=list)
+    rank_by: Mapped[str] = mapped_column(String(32), default="profit_factor")
+    results: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 def get_engine(settings: Settings):
     # Supabase/Neon connection strings come as "postgresql://..." which
     # SQLAlchemy + psycopg2 handle natively — no URL rewriting needed.
