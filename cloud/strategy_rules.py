@@ -52,6 +52,25 @@ CONDITION_CATALOG: dict[str, dict] = {
             "tolerance_pct": {"label": "Touch tolerance (%)", "default": 2.0, "min": 0.1, "max": 15.0},
         },
     },
+    "pullback_to_any_ema": {
+        "label": "Pullback to fast OR slow EMA (bounce)",
+        "params": {
+            "fast_period": {"label": "Fast EMA period", "default": 20, "min": 2, "max": 300},
+            "slow_period": {"label": "Slow EMA period", "default": 50, "min": 2, "max": 300},
+            "tolerance_pct": {"label": "Touch tolerance (%)", "default": 2.0, "min": 0.1, "max": 15.0},
+        },
+    },
+    "ema_rising": {
+        "label": "EMA rising (vs N days ago)",
+        "params": {
+            "period": {"label": "EMA period", "default": 20, "min": 2, "max": 300},
+            "lookback": {"label": "Compare vs N days ago", "default": 3, "min": 1, "max": 30},
+        },
+    },
+    "bullish_candle": {
+        "label": "Bullish candle (close above open)",
+        "params": {},
+    },
     "rsi_above": {
         "label": "RSI above value",
         "params": {
@@ -201,6 +220,29 @@ def evaluate_condition(cond: Condition, cache: IndicatorCache, i: int) -> bool |
         near_ema = abs(bars[i].low - ema_val) / ema_val * 100 <= tolerance_pct
         bouncing = bars[i].close > ema_val
         return near_ema and bouncing
+
+    if t == "pullback_to_any_ema":
+        fast = cache.ema(int(p["fast_period"]))
+        slow = cache.ema(int(p["slow_period"]))
+        if fast[i] is None or slow[i] is None:
+            return None
+        tolerance_pct = float(p.get("tolerance_pct", 2.0))
+
+        def _bounce(ema_val: float) -> bool:
+            near = abs(bars[i].low - ema_val) / ema_val * 100 <= tolerance_pct
+            return near and bars[i].close > ema_val
+
+        return _bounce(fast[i]) or _bounce(slow[i])
+
+    if t == "ema_rising":
+        series = cache.ema(int(p["period"]))
+        lookback = int(p.get("lookback", 3))
+        if i < lookback or series[i] is None or series[i - lookback] is None:
+            return None
+        return series[i] > series[i - lookback]
+
+    if t == "bullish_candle":
+        return bars[i].close > bars[i].open
 
     if t == "rsi_above":
         series = cache.rsi(int(p["period"]))
