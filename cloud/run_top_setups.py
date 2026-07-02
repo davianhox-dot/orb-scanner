@@ -79,15 +79,19 @@ def run() -> int:
     universe = build_universe(latest_rows, min_price, max_price, universe_n)
     logger.info("Universe: %d tickers (top by $ volume, $%s-%s)", len(universe), min_price, max_price)
 
+    # SPY rides along for the market regime + relative-strength grading —
+    # it is NOT scanned as a setup candidate.
     bars_by_ticker, latest_day = fetch_history(
-        settings.POLYGON_API_KEY, universe, n_bars=history_bars, end_day=probe_day,
+        settings.POLYGON_API_KEY, universe + ["SPY"], n_bars=max(history_bars, 210), end_day=probe_day,
         progress_callback=lambda done, total: (done % 25 == 0) and logger.info("History %d/%d days", done, total),
     )
+    spy_bars = bars_by_ticker.pop("SPY", [])
 
     with Session() as db:
         result = find_top_setups(
             db, settings, strategies, bars_by_ticker,
             backtest_years=backtest_years, min_trades=min_trades, top_k=top_k,
+            spy_bars=spy_bars,
             progress_callback=lambda msg: logger.info(msg),
         )
 
@@ -100,6 +104,7 @@ def run() -> int:
                     "history_bars": history_bars, "backtest_years": backtest_years,
                     "min_trades": min_trades, "top_k": top_k,
                     "strategies": [n for n, _ in strategies],
+                    "market_regime": result.market_regime,
                 },
                 top=[s.__dict__ for s in result.top],
                 candidates_count=len(result.all_candidates),
@@ -115,7 +120,7 @@ def run() -> int:
 
     # --- alerts (only when there's something to say) ---
     if result.top:
-        message = format_alert_message(result.top, str(latest_day))
+        message = format_alert_message(result.top, str(latest_day), regime=result.market_regime)
         sent = {
             "discord": send_discord(settings, message),
             "telegram": send_telegram(settings, message),
