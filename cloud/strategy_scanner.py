@@ -182,7 +182,11 @@ def scan_for_signals(
         entry_ok = evaluate_all(config.entry_conditions, config.entry_logic, cache, i)
 
         if trend_ok is True and entry_ok is True:
-            entry_price = bars[i].close  # proxy: real entry = next day's open
+            if config.entry_fill == "break_signal_high":
+                # Buy-stop plan: enter only if price breaks the signal candle's high
+                entry_price = bars[i].high
+            else:
+                entry_price = bars[i].close  # proxy: real entry = next day's open
             stop_price = _resolve_stop(entry_price, config.exit_rules, cache, i)
             if stop_price is None or stop_price >= entry_price:
                 if progress_callback:
