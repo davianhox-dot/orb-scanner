@@ -15,6 +15,7 @@ def config_to_dict(config: StrategyConfig) -> dict:
         "trend_filters": [{"type": c.type, "params": c.params} for c in config.trend_filters],
         "entry_conditions": [{"type": c.type, "params": c.params} for c in config.entry_conditions],
         "entry_logic": config.entry_logic,
+        "entry_fill": config.entry_fill,
         "exit_rules": config.exit_rules.__dict__,
         "position_sizing": config.position_sizing.__dict__,
         "initial_capital": config.initial_capital,
@@ -27,6 +28,7 @@ def config_from_dict(d: dict) -> StrategyConfig:
         trend_filters=[Condition(c["type"], c["params"]) for c in d.get("trend_filters", [])],
         entry_conditions=[Condition(c["type"], c["params"]) for c in d.get("entry_conditions", [])],
         entry_logic=d.get("entry_logic", "AND"),
+        entry_fill=d.get("entry_fill", "next_open"),  # older saved strategies default to original behavior
         exit_rules=ExitRuleConfig(**d.get("exit_rules", {})),
         position_sizing=PositionSizingConfig(**d.get("position_sizing", {})),
         initial_capital=d.get("initial_capital", 10_000.0),
@@ -45,11 +47,24 @@ _PRESETS: dict[str, StrategyConfig] = {
     ),
     "EMA Pullback": StrategyConfig(
         name="EMA Pullback",
-        trend_filters=[Condition("above_ema", {"period": 50})],
-        entry_conditions=[Condition("pullback_to_ema", {"period": 20, "tolerance_pct": 2.0})],
+        # Checklist: above EMA50 AND EMA200, EMA20 rising
+        trend_filters=[
+            Condition("above_ema", {"period": 50}),
+            Condition("above_ema", {"period": 200}),
+            Condition("ema_rising", {"period": 20, "lookback": 3}),
+        ],
+        # Checklist: pullback to EMA20 OR EMA50, plus a bullish confirmation candle
+        entry_conditions=[
+            Condition("pullback_to_any_ema", {"fast_period": 20, "slow_period": 50, "tolerance_pct": 2.0}),
+            Condition("bullish_candle", {}),
+        ],
         entry_logic="AND",
+        # Checklist: entry above the confirmation candle's high (buy-stop) —
+        # if the next day never breaks that high, there is NO trade.
+        entry_fill="break_signal_high",
+        # Checklist: stop under the recent low (swing low of the pullback)
         exit_rules=ExitRuleConfig(
-            stop_type="atr_multiple", stop_value=2.0, stop_atr_period=14,
+            stop_type="swing_low", stop_value=5,
             target_type="r_multiple", target_value=2.5, max_holding_days=25,
         ),
         position_sizing=PositionSizingConfig(method="fixed_pct_risk", value=1.0),
