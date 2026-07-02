@@ -59,6 +59,9 @@ class TopSetup:
     expectancy: float
     max_drawdown_pct: float
     low_sample: bool
+    pro_factors: list[str] = field(default_factory=list)
+    risk_factors: list[str] = field(default_factory=list)
+    news: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -157,6 +160,23 @@ def find_top_setups(
         result.top.append(c)
         if len(result.top) >= top_k:
             break
+
+    # --- 6. rationale (pro/contra factors + news) — only for the final
+    # top-K, so news fetching stays at max top_k API calls ---
+    from cloud.setup_rationale import build_rationale  # local import avoids a cycle
+
+    for setup in result.top:
+        if progress_callback:
+            progress_callback(f"Begründung für {setup.ticker} erstellen…")
+        rationale = build_rationale(
+            settings, setup.ticker, bars_by_ticker.get(setup.ticker, []),
+            entry=setup.entry, stop=setup.stop,
+            total_trades=setup.total_trades, win_rate_pct=setup.win_rate_pct,
+            profit_factor=setup.profit_factor, low_sample=setup.low_sample,
+        )
+        setup.pro_factors = rationale.pro_factors
+        setup.risk_factors = rationale.risk_factors
+        setup.news = rationale.news
 
     return result
 
