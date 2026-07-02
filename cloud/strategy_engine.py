@@ -48,12 +48,21 @@ class PositionSizingConfig:
     value: float = 1.0  # % of capital, or $ amount, depending on method
 
 
+ENTRY_FILL_MODES = ("next_open", "break_signal_high")
+
+
 @dataclass
 class StrategyConfig:
     name: str = "Custom Strategy"
     trend_filters: list[Condition] = field(default_factory=list)
     entry_conditions: list[Condition] = field(default_factory=list)
     entry_logic: str = "AND"
+    # "next_open": buy at the next day's open unconditionally (original behavior).
+    # "break_signal_high": buy-stop just above the signal candle's high — the
+    # next day must actually trade above that high, otherwise NO trade. If
+    # the next day gaps open above the trigger, fill at the open (realistic
+    # for a stop order).
+    entry_fill: str = "next_open"
     exit_rules: ExitRuleConfig = field(default_factory=ExitRuleConfig)
     position_sizing: PositionSizingConfig = field(default_factory=PositionSizingConfig)
     initial_capital: float = 10_000.0
@@ -106,7 +115,16 @@ def _find_trades_for_ticker(
 
         if trend_ok is True and entry_ok is True:
             entry_bar = bars[i + 1]
-            entry_price = entry_bar.open
+
+            if config.entry_fill == "break_signal_high":
+                trigger = bars[i].high
+                if entry_bar.high <= trigger:
+                    i += 1  # next day never broke the signal candle's high -> no trade
+                    continue
+                # Buy-stop fill: at the trigger, or at the open if it gapped above
+                entry_price = max(trigger, entry_bar.open)
+            else:
+                entry_price = entry_bar.open
 
             stop_price = _resolve_stop(entry_price, config.exit_rules, cache, i)
             if stop_price is None or stop_price >= entry_price:
