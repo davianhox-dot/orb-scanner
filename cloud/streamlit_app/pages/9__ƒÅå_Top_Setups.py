@@ -93,6 +93,31 @@ def _render_setups(setups: list[dict], scan_day: str) -> None:
                     "die Statistik ist dünn. Eher Anekdote als Beweis."
                 )
 
+            pros = s.get("pro_factors") or []
+            risks = s.get("risk_factors") or []
+            if pros or risks:
+                pro_col, risk_col = st.columns(2)
+                with pro_col:
+                    st.markdown("**✅ Was dafür spricht**")
+                    for f in pros:
+                        st.markdown(f"- {f}")
+                with risk_col:
+                    st.markdown("**⚠️ Was dagegen spricht**")
+                    if risks:
+                        for f in risks:
+                            st.markdown(f"- {f}")
+                    else:
+                        st.markdown("- Keine auffälligen Warnsignale in den geprüften Faktoren.")
+
+            news = s.get("news") or []
+            if news:
+                with st.expander(f"📰 Aktuelle News zu {s['ticker']}"):
+                    for n in news:
+                        line = f"**{n.get('published', '')}** — {n.get('headline', '')} ({n.get('source', '')})"
+                        if n.get("url"):
+                            line += f" · [Artikel]({n['url']})"
+                        st.markdown(line)
+
 
 # --- Latest nightly run ---
 with Session() as db:
