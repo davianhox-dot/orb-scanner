@@ -59,6 +59,10 @@ class TopSetup:
     expectancy: float
     max_drawdown_pct: float
     low_sample: bool
+    grade: str = "C"
+    grade_points: float = 0.0
+    grade_reasons: list[str] = field(default_factory=list)
+    score_adjusted: float = 0.0
     pro_factors: list[str] = field(default_factory=list)
     risk_factors: list[str] = field(default_factory=list)
     news: list[dict] = field(default_factory=list)
@@ -70,6 +74,7 @@ class TopSetupsResult:
     all_candidates: list[TopSetup] = field(default_factory=list)
     hits_scanned: int = 0
     hits_rejected: int = 0
+    market_regime: dict = field(default_factory=dict)
 
 
 def composite_score(metrics: dict) -> float:
@@ -90,9 +95,15 @@ def find_top_setups(
     backtest_years: int = 2,
     min_trades: int = 5,
     top_k: int = 3,
+    spy_bars: list[HistoricalBar] | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> TopSetupsResult:
+    from cloud.market_regime import compute_regime
+    from cloud.setup_grade import grade_setup
+
     result = TopSetupsResult()
+    regime = compute_regime(spy_bars)
+    result.market_regime = regime.to_dict()
     bt_end = date.today() - timedelta(days=1)
     bt_start = bt_end - timedelta(days=365 * backtest_years)
 
@@ -128,6 +139,13 @@ def find_top_setups(
             result.hits_rejected += 1
             continue
 
+        base_score = composite_score(m)
+        g = grade_setup(
+            bars_by_ticker.get(hit.ticker, []), spy_bars,
+            entry=hit.entry, stop=hit.stop, target=hit.target,
+            max_holding_days=config.exit_rules.max_holding_days,
+        )
+
         candidates.append(
             TopSetup(
                 ticker=hit.ticker,
@@ -137,7 +155,7 @@ def find_top_setups(
                 stop=hit.stop,
                 target=hit.target,
                 risk_reward=hit.risk_reward,
-                score=composite_score(m),
+                score=base_score,
                 total_trades=trades_n,
                 win_rate_pct=m.get("win_rate_pct", 0.0),
                 profit_factor=m.get("profit_factor"),
@@ -145,11 +163,16 @@ def find_top_setups(
                 expectancy=m.get("expectancy", 0.0),
                 max_drawdown_pct=m.get("max_drawdown_pct", 0.0),
                 low_sample=trades_n < LOW_SAMPLE_THRESHOLD,
+                grade=g.grade,
+                grade_points=g.points,
+                grade_reasons=g.reasons,
+                score_adjusted=round(max(0.0, base_score + regime.score_adjust), 1),
             )
         )
 
-    # --- 4+5. rank, dedup by ticker, take top K ---
-    candidates.sort(key=lambda c: c.score, reverse=True)
+    # --- 4+5. rank (grade first, then regime-adjusted score), dedup, top K ---
+    grade_order = {"A": 0, "B": 1, "C": 2}
+    candidates.sort(key=lambda c: (grade_order.get(c.grade, 3), -c.score_adjusted))
     result.all_candidates = candidates
 
     seen_tickers: set[str] = set()
@@ -181,15 +204,17 @@ def find_top_setups(
     return result
 
 
-def format_alert_message(top: list[TopSetup], scan_day: str) -> str:
+def format_alert_message(top: list[TopSetup], scan_day: str, regime: dict | None = None) -> str:
     """Compact Discord/Telegram message for the nightly job."""
+    ampel = {"green": "🟢", "yellow": "🟡", "red": "🔴"}.get((regime or {}).get("status", ""), "")
+    header = f"🏆 Top Setups {scan_day}" + (f" · Markt {ampel}" if ampel else "")
     if not top:
-        return f"📡 Top Setups {scan_day}: no qualifying setup today."
-    lines = [f"🏆 Top Setups {scan_day}:"]
+        return f"📡 {header}: no qualifying setup today."
+    lines = [f"{header}:"]
     for i, s in enumerate(top, start=1):
         flag = " ⚠️wenig Historie" if s.low_sample else ""
         lines.append(
-            f"{i}. {s.ticker} · {s.strategy_name} · Score {s.score:.0f}{flag}\n"
+            f"{i}. {s.ticker} · Note {s.grade} · {s.strategy_name} · Score {s.score_adjusted:.0f}{flag}\n"
             f"   Entry >{s.entry:.2f} · SL {s.stop:.2f} · TP {s.target:.2f} (R:R {s.risk_reward:.1f})\n"
             f"   Historie: {s.total_trades} Trades, {s.win_rate_pct:.0f}% WR, PF "
             f"{'∞' if s.profit_factor is None else f'{s.profit_factor:.2f}'}"
