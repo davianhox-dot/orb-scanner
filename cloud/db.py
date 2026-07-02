@@ -186,6 +186,23 @@ class OptimizationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class TopSetupRun(Base):
+    """One Top-Setups scan (manual or nightly): which day was scanned, the
+    settings used, and the resulting ranked setups — so the app can show
+    'last night's picks' without re-scanning."""
+
+    __tablename__ = "top_setup_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    scan_day: Mapped[str] = mapped_column(String(10))
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # "manual" | "nightly"
+    settings_used: Mapped[dict] = mapped_column(JSON, default=dict)
+    top: Mapped[list] = mapped_column(JSON, default=list)
+    candidates_count: Mapped[int] = mapped_column(Integer, default=0)
+    hits_scanned: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 def get_engine(settings: Settings):
     # Supabase/Neon connection strings come as "postgresql://..." which
     # SQLAlchemy + psycopg2 handle natively — no URL rewriting needed.
