@@ -57,8 +57,33 @@ st.info(
     "funktioniert\" ist selbst ein Auswahleffekt — wer 150 Aktien nach der schönsten "
     "Vergangenheit durchsiebt, findet auch Zufallstreffer. Der Mindest-Trade-Filter mildert "
     "das, heilt es aber nicht. Das hier ist eine vorgefilterte Shortlist für **dein** Urteil, "
-    "keine Kaufliste."
+    "keine Kaufliste. Und zur Frage \"würden Hedgefonds das kaufen?\": Das kann **niemand** "
+    "messen — institutionelle Positionen werden erst Monate später öffentlich. Die A/B/C-Note "
+    "unten prüft stattdessen die messbaren Kriterien, nach denen institutionelles Geld "
+    "nachweislich auswählt: Liquidität, relative Stärke vs. Markt, Akkumulation, realistische "
+    "Ziele, saubere Stops."
 )
+
+_GRADE_STYLE = {"A": ("🟢", "green"), "B": ("🟡", "orange"), "C": ("🔴", "red")}
+_REGIME_LABELS = {
+    "green": "🟢 Markt-Ampel: Grün — Gesamtmarkt im Aufwärtstrend, Rückenwind für Long-Setups",
+    "yellow": "🟡 Markt-Ampel: Gelb — Gesamtmarkt im Übergang, Scores um 10 Punkte reduziert",
+    "red": "🔴 Markt-Ampel: Rot — Gesamtmarkt im Abwärtstrend, Scores um 25 Punkte reduziert. Die meisten Ausbrüche scheitern in diesem Umfeld.",
+    "unknown": "⚪ Markt-Ampel: unbekannt (keine SPY-Daten) — keine Markt-Anpassung angewendet",
+}
+
+
+def _render_regime(regime: dict | None) -> None:
+    if not regime:
+        return
+    status = regime.get("status", "unknown")
+    text = _REGIME_LABELS.get(status, _REGIME_LABELS["unknown"])
+    if status == "red":
+        st.error(text)
+    elif status == "yellow":
+        st.warning(text)
+    else:
+        st.success(text) if status == "green" else st.caption(text)
 
 
 def _render_setups(setups: list[dict], scan_day: str) -> None:
@@ -70,15 +95,26 @@ def _render_setups(setups: list[dict], scan_day: str) -> None:
         return
     for i, s in enumerate(setups, start=1):
         with st.container(border=True):
-            head, score_col = st.columns([3, 1])
+            head, grade_col, score_col = st.columns([3, 1, 1])
             head.markdown(f"### {i}. {s['ticker']} · {s['strategy_name']}")
-            score_col.metric("Score", f"{s['score']:.0f} / 100")
+            grade = s.get("grade")
+            if grade:
+                emoji, color = _GRADE_STYLE.get(grade, ("", "gray"))
+                grade_col.markdown(f"## :{color}[{emoji} Note {grade}]")
+                grade_col.caption(f"{s.get('grade_points', 0):.0f}/100 Qualitätspunkte")
+            score_col.metric("Score", f"{s.get('score_adjusted', s['score']):.0f} / 100")
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Entry (über)", f"${s['entry']:.2f}")
             c2.metric("Stop Loss", f"${s['stop']:.2f}")
             c3.metric("Take Profit", f"${s['target']:.2f}")
             c4.metric("R:R", f"{s['risk_reward']:.1f}")
+
+            grade_reasons = s.get("grade_reasons") or []
+            if grade_reasons:
+                with st.expander(f"🎓 Wie die Note {grade} zustande kommt"):
+                    for reason in grade_reasons:
+                        st.markdown(f"- {reason}")
 
             pf = s.get("profit_factor")
             st.caption(
@@ -131,6 +167,7 @@ if last_run is not None:
         f"{last_run.hits_scanned} Signale geprüft · {last_run.candidates_count} haben den "
         f"Qualitätsfilter bestanden · Top {len(last_run.top)} angezeigt"
     )
+    _render_regime((last_run.settings_used or {}).get("market_regime"))
     _render_setups(last_run.top, last_run.scan_day)
     st.divider()
 else:
@@ -206,15 +243,17 @@ if st.button("🏆 Top Setups finden", type="primary"):
 
                 hist_progress = st.progress(0.0, text="Historie laden…")
                 bars_by_ticker, latest_day = fetch_history(
-                    settings.POLYGON_API_KEY, universe, n_bars=int(history_bars), end_day=probe_day,
+                    settings.POLYGON_API_KEY, universe + ["SPY"], n_bars=max(int(history_bars), 210), end_day=probe_day,
                     progress_callback=lambda done, total: hist_progress.progress(done / total, text=f"Tag {done}/{total}"),
                 )
+                spy_bars = bars_by_ticker.pop("SPY", [])
 
                 progress_line = st.empty()
                 with Session() as db:
                     result = find_top_setups(
                         db, settings, strategies, bars_by_ticker,
                         backtest_years=int(backtest_years), min_trades=int(min_trades), top_k=int(top_k),
+                        spy_bars=spy_bars,
                         progress_callback=lambda msg: progress_line.write(msg),
                     )
                     db.add(
@@ -225,6 +264,7 @@ if st.button("🏆 Top Setups finden", type="primary"):
                                 "universe": int(top_n), "history_bars": int(history_bars),
                                 "backtest_years": int(backtest_years), "min_trades": int(min_trades),
                                 "top_k": int(top_k), "strategies": chosen,
+                                "market_regime": result.market_regime,
                             },
                             top=[s.__dict__ for s in result.top],
                             candidates_count=len(result.all_candidates),
@@ -241,6 +281,7 @@ if st.button("🏆 Top Setups finden", type="primary"):
             st.stop()
 
         st.subheader(f"Ergebnis — {latest_day}")
+        _render_regime(result.market_regime)
         _render_setups([s.__dict__ for s in result.top], str(latest_day))
 
         if result.all_candidates:
@@ -248,7 +289,8 @@ if st.button("🏆 Top Setups finden", type="primary"):
                 df = pd.DataFrame(
                     [
                         {
-                            "Ticker": c.ticker, "Strategie": c.strategy_name, "Score": c.score,
+                            "Ticker": c.ticker, "Note": c.grade, "Strategie": c.strategy_name,
+                            "Score": c.score_adjusted,
                             "Entry": c.entry, "SL": c.stop, "TP": c.target, "R:R": c.risk_reward,
                             "Trades": c.total_trades, "WR %": c.win_rate_pct,
                             "PF": c.profit_factor, "Ø R": c.avg_r_multiple,
