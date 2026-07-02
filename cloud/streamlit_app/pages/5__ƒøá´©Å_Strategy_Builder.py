@@ -55,6 +55,7 @@ def _load_config_into_session(cfg: StrategyConfig) -> None:
     st.session_state["sb_trend_conditions"] = [{"type": c.type, "params": c.params} for c in cfg.trend_filters]
     st.session_state["sb_entry_conditions"] = [{"type": c.type, "params": c.params} for c in cfg.entry_conditions]
     st.session_state["sb_entry_logic"] = cfg.entry_logic
+    st.session_state["sb_entry_fill"] = cfg.entry_fill
     st.session_state["sb_stop_type"] = cfg.exit_rules.stop_type
     st.session_state["sb_stop_value"] = float(cfg.exit_rules.stop_value)
     st.session_state["sb_stop_atr_period"] = int(cfg.exit_rules.stop_atr_period)
@@ -157,6 +158,15 @@ entry_conditions = _render_condition_builder(
     "sb_entry", "Entry Conditions", "Combined using the logic you choose below."
 )
 entry_logic = st.radio("Combine entry conditions using", ["AND", "OR"], key="sb_entry_logic", horizontal=True)
+entry_fill = st.selectbox(
+    "Entry execution",
+    ["next_open", "break_signal_high"],
+    format_func=lambda v: {
+        "next_open": "Next day's open (unconditional)",
+        "break_signal_high": "Buy-stop above signal candle's high (no break → no trade)",
+    }[v],
+    key="sb_entry_fill",
+)
 
 st.divider()
 st.subheader("Exit Rules")
@@ -210,6 +220,7 @@ def _current_config() -> StrategyConfig:
         trend_filters=trend_conditions,
         entry_conditions=entry_conditions,
         entry_logic=entry_logic,
+        entry_fill=entry_fill,
         exit_rules=ExitRuleConfig(
             stop_type=stop_type, stop_value=stop_value, stop_atr_period=int(stop_atr_period),
             target_type=target_type, target_value=target_value,
