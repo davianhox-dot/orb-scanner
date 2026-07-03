@@ -32,6 +32,7 @@ from sqlalchemy import select
 from cloud.config import get_settings
 from cloud.db import SavedStrategy, TopSetupRun, get_session_factory, init_db
 from cloud.historical_data import get_bars
+from cloud.indicators import ema as indicator_ema
 from cloud.strategy_presets import PRESET_NAMES, config_from_dict, get_preset
 from cloud.strategy_scanner import MAX_UNIVERSE, build_universe, fetch_grouped_daily, fetch_history
 from cloud.top_setups import LOW_SAMPLE_THRESHOLD, find_top_setups
@@ -94,11 +95,15 @@ _REASON_COLORS = alt.Scale(
 )
 
 
-def _render_history_chart(ticker: str, entry_level: float, history_trades: list[dict]) -> None:
+def _render_history_chart(
+    ticker: str, entry_level: float, history_trades: list[dict], overlays: list[dict] | None = None
+) -> None:
     """Price chart from the cached daily bars with every historical
     backtest signal marked: green triangles = entries, exit dots colored by
     reason (green target / red stop / gray time exit / blue trailing stop),
-    dashed line = the CURRENT setup's entry level."""
+    dashed line = the CURRENT setup's entry level. Overlays derived from
+    the strategy's own conditions (EMAs, breakout range lines) show the
+    confluences that produced each signal."""
     if not history_trades:
         st.caption("Keine historischen Trades zum Einzeichnen vorhanden.")
         return
@@ -107,8 +112,14 @@ def _render_history_chart(ticker: str, entry_level: float, history_trades: list[
     chart_start = date.fromisoformat(first_entry) - timedelta(days=30)
     chart_end = date.today()
 
+    # Fetch extra lead-in history so long EMAs (e.g. EMA200) are accurate
+    # from the left edge of the chart instead of starting mid-way.
+    max_ema_period = max((o.get("period", 0) for o in (overlays or []) if o.get("kind") == "ema"), default=0)
+    max_lookback = max((o.get("lookback", 0) for o in (overlays or []) if o.get("kind") != "ema"), default=0)
+    lead_in_days = int(max(max_ema_period, max_lookback) * 1.6) + 10
+
     with Session() as db:
-        bars = get_bars(db, ticker, chart_start, chart_end, timeframe="day")
+        bars = get_bars(db, ticker, chart_start - timedelta(days=lead_in_days), chart_end, timeframe="day")
     if len(bars) < 10:
         st.caption(
             "Kursdaten für das Chart sind (noch) nicht im Cache — sie werden beim nächsten "
@@ -116,9 +127,40 @@ def _render_history_chart(ticker: str, entry_level: float, history_trades: list[
         )
         return
 
-    price_df = pd.DataFrame(
-        [{"Datum": b.timestamp.date().isoformat(), "Kurs": b.close} for b in bars]
-    )
+    bars = sorted(bars, key=lambda b: b.timestamp)
+    visible_from = chart_start.isoformat()
+
+    price_rows = [
+        {"Datum": b.timestamp.date().isoformat(), "Kurs": b.close}
+        for b in bars
+        if b.timestamp.date().isoformat() >= visible_from
+    ]
+    price_df = pd.DataFrame(price_rows)
+
+    # --- overlay series (computed on the full extended window, displayed trimmed) ---
+    ema_rows: list[dict] = []
+    range_rows: list[dict] = []
+    closes = [b.close for b in bars]
+    for o in overlays or []:
+        if o.get("kind") == "ema":
+            period = int(o["period"])
+            series = indicator_ema(closes, period)
+            for b, v in zip(bars, series):
+                d = b.timestamp.date().isoformat()
+                if v is not None and d >= visible_from:
+                    ema_rows.append({"Datum": d, "Wert": round(v, 2), "Linie": f"EMA{period}"})
+        elif o.get("kind") in ("rolling_high", "rolling_low"):
+            lookback = int(o["lookback"])
+            is_high = o["kind"] == "rolling_high"
+            label = f"{lookback}T-{'Hoch' if is_high else 'Tief'}"
+            for i in range(lookback, len(bars)):
+                d = bars[i].timestamp.date().isoformat()
+                if d < visible_from:
+                    continue
+                window = bars[i - lookback : i]
+                v = max(b.high for b in window) if is_high else min(b.low for b in window)
+                range_rows.append({"Datum": d, "Wert": round(v, 2), "Linie": label})
+
     entries_df = pd.DataFrame(
         [{"Datum": t["entry_date"], "Kurs": t["entry"], "Art": "Einstieg", "R": t["r"], "Grund": t["reason"]} for t in history_trades]
     )
@@ -126,33 +168,64 @@ def _render_history_chart(ticker: str, entry_level: float, history_trades: list[
         [{"Datum": t["exit_date"], "Kurs": t["exit"], "Grund": t["reason"], "R": t["r"]} for t in history_trades]
     )
 
-    base = alt.Chart(price_df).mark_line(color="#455a64", strokeWidth=1.5).encode(
-        x=alt.X("Datum:T", title=None),
-        y=alt.Y("Kurs:Q", title="Kurs ($)", scale=alt.Scale(zero=False)),
+    layers = [
+        alt.Chart(price_df).mark_line(color="#455a64", strokeWidth=1.5).encode(
+            x=alt.X("Datum:T", title=None),
+            y=alt.Y("Kurs:Q", title="Kurs ($)", scale=alt.Scale(zero=False)),
+        )
+    ]
+    _OVERLAY_COLORS = alt.Scale(
+        domain=["EMA20", "EMA50", "EMA100", "EMA200"],
+        range=["#f9a825", "#8e24aa", "#00838f", "#37474f"],
     )
-    entry_marks = alt.Chart(entries_df).mark_point(
-        shape="triangle-up", size=110, color="#2e7d32", filled=True
-    ).encode(
-        x="Datum:T", y="Kurs:Q",
-        tooltip=[alt.Tooltip("Datum:T"), alt.Tooltip("Kurs:Q", title="Entry"), alt.Tooltip("R:Q", title="Ergebnis (R)")],
-    )
-    exit_marks = alt.Chart(exits_df).mark_point(shape="circle", size=80, filled=True).encode(
-        x="Datum:T", y="Kurs:Q",
-        color=alt.Color("Grund:N", scale=_REASON_COLORS, legend=alt.Legend(title="Exit-Grund", orient="bottom")),
-        tooltip=[alt.Tooltip("Datum:T"), alt.Tooltip("Kurs:Q", title="Exit"), alt.Tooltip("Grund:N"), alt.Tooltip("R:Q", title="R")],
-    )
-    entry_rule = alt.Chart(pd.DataFrame({"y": [entry_level]})).mark_rule(
-        strokeDash=[6, 4], color="#e65100", strokeWidth=1.5
-    ).encode(y="y:Q")
+    if ema_rows:
+        layers.append(
+            alt.Chart(pd.DataFrame(ema_rows)).mark_line(strokeWidth=1.2, opacity=0.9).encode(
+                x="Datum:T", y="Wert:Q",
+                color=alt.Color("Linie:N", scale=_OVERLAY_COLORS, legend=alt.Legend(title="Konfluenzen", orient="bottom")),
+                tooltip=["Datum:T", "Linie:N", alt.Tooltip("Wert:Q", format=".2f")],
+            )
+        )
+    if range_rows:
+        layers.append(
+            alt.Chart(pd.DataFrame(range_rows)).mark_line(strokeWidth=1.2, strokeDash=[4, 3], opacity=0.85).encode(
+                x="Datum:T", y="Wert:Q",
+                color=alt.Color("Linie:N", legend=alt.Legend(title="Range", orient="bottom")),
+                tooltip=["Datum:T", "Linie:N", alt.Tooltip("Wert:Q", format=".2f")],
+            )
+        )
 
-    st.altair_chart(
-        (base + entry_marks + exit_marks + entry_rule).properties(height=280),
-        width="stretch",
+    layers.append(
+        alt.Chart(entries_df).mark_point(shape="triangle-up", size=110, color="#2e7d32", filled=True).encode(
+            x="Datum:T", y="Kurs:Q",
+            tooltip=[alt.Tooltip("Datum:T"), alt.Tooltip("Kurs:Q", title="Entry"), alt.Tooltip("R:Q", title="Ergebnis (R)")],
+        )
     )
+    layers.append(
+        alt.Chart(exits_df).mark_point(shape="circle", size=80, filled=True).encode(
+            x="Datum:T", y="Kurs:Q",
+            color=alt.Color("Grund:N", scale=_REASON_COLORS, legend=alt.Legend(title="Exit-Grund", orient="bottom")),
+            tooltip=[alt.Tooltip("Datum:T"), alt.Tooltip("Kurs:Q", title="Exit"), alt.Tooltip("Grund:N"), alt.Tooltip("R:Q", title="R")],
+        )
+    )
+    layers.append(
+        alt.Chart(pd.DataFrame({"y": [entry_level]})).mark_rule(
+            strokeDash=[6, 4], color="#e65100", strokeWidth=1.5
+        ).encode(y="y:Q")
+    )
+
+    chart = layers[0]
+    for layer in layers[1:]:
+        chart = chart + layer
+    st.altair_chart(chart.properties(height=300).resolve_scale(color="independent"), width="stretch")
+    overlay_note = ""
+    if ema_rows or range_rows:
+        drawn = sorted({r["Linie"] for r in ema_rows} | {r["Linie"] for r in range_rows})
+        overlay_note = f" · Konfluenz-Linien aus den Strategie-Bedingungen: {', '.join(drawn)}"
     st.caption(
         "▲ grün = historischer Einstieg · ● Ausstieg gefärbt nach Grund (grün Ziel, rot Stop, "
-        "grau Zeit, blau Trailing) · gestrichelte Linie = Entry-Level des **aktuellen** Setups. "
-        "Punkte anklicken/hovern zeigt Datum und R-Ergebnis."
+        "grau Zeit, blau Trailing) · gestrichelte orange Linie = Entry-Level des **aktuellen** "
+        f"Setups{overlay_note}. Punkte anklicken/hovern zeigt Datum und R-Ergebnis."
     )
 
 
@@ -189,7 +262,7 @@ def _render_setups(setups: list[dict], scan_day: str) -> None:
             history_trades = s.get("history_trades") or []
             if history_trades:
                 with st.expander(f"📉 Chart: wie die Strategie auf {s['ticker']} historisch lief", expanded=(i == 1)):
-                    _render_history_chart(s["ticker"], s["entry"], history_trades)
+                    _render_history_chart(s["ticker"], s["entry"], history_trades, s.get("overlays"))
 
             pf = s.get("profit_factor")
             st.caption(
