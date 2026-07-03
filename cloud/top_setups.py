@@ -64,6 +64,41 @@ class TopSetup:
     grade_reasons: list[str] = field(default_factory=list)
     score_adjusted: float = 0.0
     history_trades: list[dict] = field(default_factory=list)  # past backtest trades, for the signal-history chart
+    overlays: list[dict] = field(default_factory=list)  # indicator overlays for the chart, derived from the strategy
+
+
+def _overlays_from_config(config: StrategyConfig) -> list[dict]:
+    """Derive which price-scale overlays the chart should draw so the
+    'confluences' behind each signal are visible: EMAs for EMA-based
+    conditions, rolling high/low range lines for breakout conditions.
+    Non-price indicators (RSI, MACD, ADX, volume) live on other scales and
+    are deliberately not drawn on the price chart."""
+    overlays: list[dict] = []
+    seen: set[tuple] = set()
+
+    def add(kind: str, **params) -> None:
+        key = (kind, tuple(sorted(params.items())))
+        if key not in seen:
+            seen.add(key)
+            overlays.append({"kind": kind, **params})
+
+    for cond in list(config.trend_filters) + list(config.entry_conditions):
+        p = cond.params
+        if cond.type in ("above_ema", "ema_rising", "pullback_to_ema"):
+            add("ema", period=int(p.get("period", 20)))
+        elif cond.type == "ema_above_ema":
+            add("ema", period=int(p.get("fast_period", 20)))
+            add("ema", period=int(p.get("slow_period", 50)))
+        elif cond.type == "pullback_to_any_ema":
+            add("ema", period=int(p.get("fast_period", 20)))
+            add("ema", period=int(p.get("slow_period", 50)))
+        elif cond.type == "breakout_high":
+            add("rolling_high", lookback=int(p.get("lookback", 20)))
+        elif cond.type == "consolidation_breakout":
+            add("rolling_high", lookback=int(p.get("lookback", 15)))
+            add("rolling_low", lookback=int(p.get("lookback", 15)))
+
+    return overlays
     pro_factors: list[str] = field(default_factory=list)
     risk_factors: list[str] = field(default_factory=list)
     news: list[dict] = field(default_factory=list)
@@ -180,6 +215,7 @@ def find_top_setups(
                 grade_reasons=g.reasons,
                 score_adjusted=round(max(0.0, base_score + regime.score_adjust), 1),
                 history_trades=history_trades,
+                overlays=_overlays_from_config(config),
             )
         )
 
