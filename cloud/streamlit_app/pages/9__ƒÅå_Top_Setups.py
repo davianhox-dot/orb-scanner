@@ -23,6 +23,7 @@ _add_repo_root_to_path()
 
 from datetime import date, timedelta
 
+import altair as alt
 import httpx
 import pandas as pd
 import streamlit as st
@@ -30,6 +31,7 @@ from sqlalchemy import select
 
 from cloud.config import get_settings
 from cloud.db import SavedStrategy, TopSetupRun, get_session_factory, init_db
+from cloud.historical_data import get_bars
 from cloud.strategy_presets import PRESET_NAMES, config_from_dict, get_preset
 from cloud.strategy_scanner import MAX_UNIVERSE, build_universe, fetch_grouped_daily, fetch_history
 from cloud.top_setups import LOW_SAMPLE_THRESHOLD, find_top_setups
@@ -86,6 +88,74 @@ def _render_regime(regime: dict | None) -> None:
         st.success(text) if status == "green" else st.caption(text)
 
 
+_REASON_COLORS = alt.Scale(
+    domain=["target", "stop", "time_exit", "trailing_stop"],
+    range=["#2e7d32", "#c62828", "#757575", "#1565c0"],
+)
+
+
+def _render_history_chart(ticker: str, entry_level: float, history_trades: list[dict]) -> None:
+    """Price chart from the cached daily bars with every historical
+    backtest signal marked: green triangles = entries, exit dots colored by
+    reason (green target / red stop / gray time exit / blue trailing stop),
+    dashed line = the CURRENT setup's entry level."""
+    if not history_trades:
+        st.caption("Keine historischen Trades zum Einzeichnen vorhanden.")
+        return
+
+    first_entry = min(t["entry_date"] for t in history_trades)
+    chart_start = date.fromisoformat(first_entry) - timedelta(days=30)
+    chart_end = date.today()
+
+    with Session() as db:
+        bars = get_bars(db, ticker, chart_start, chart_end, timeframe="day")
+    if len(bars) < 10:
+        st.caption(
+            "Kursdaten für das Chart sind (noch) nicht im Cache — sie werden beim nächsten "
+            "Scan/Backtest dieses Tickers automatisch angelegt."
+        )
+        return
+
+    price_df = pd.DataFrame(
+        [{"Datum": b.timestamp.date().isoformat(), "Kurs": b.close} for b in bars]
+    )
+    entries_df = pd.DataFrame(
+        [{"Datum": t["entry_date"], "Kurs": t["entry"], "Art": "Einstieg", "R": t["r"], "Grund": t["reason"]} for t in history_trades]
+    )
+    exits_df = pd.DataFrame(
+        [{"Datum": t["exit_date"], "Kurs": t["exit"], "Grund": t["reason"], "R": t["r"]} for t in history_trades]
+    )
+
+    base = alt.Chart(price_df).mark_line(color="#455a64", strokeWidth=1.5).encode(
+        x=alt.X("Datum:T", title=None),
+        y=alt.Y("Kurs:Q", title="Kurs ($)", scale=alt.Scale(zero=False)),
+    )
+    entry_marks = alt.Chart(entries_df).mark_point(
+        shape="triangle-up", size=110, color="#2e7d32", filled=True
+    ).encode(
+        x="Datum:T", y="Kurs:Q",
+        tooltip=[alt.Tooltip("Datum:T"), alt.Tooltip("Kurs:Q", title="Entry"), alt.Tooltip("R:Q", title="Ergebnis (R)")],
+    )
+    exit_marks = alt.Chart(exits_df).mark_point(shape="circle", size=80, filled=True).encode(
+        x="Datum:T", y="Kurs:Q",
+        color=alt.Color("Grund:N", scale=_REASON_COLORS, legend=alt.Legend(title="Exit-Grund", orient="bottom")),
+        tooltip=[alt.Tooltip("Datum:T"), alt.Tooltip("Kurs:Q", title="Exit"), alt.Tooltip("Grund:N"), alt.Tooltip("R:Q", title="R")],
+    )
+    entry_rule = alt.Chart(pd.DataFrame({"y": [entry_level]})).mark_rule(
+        strokeDash=[6, 4], color="#e65100", strokeWidth=1.5
+    ).encode(y="y:Q")
+
+    st.altair_chart(
+        (base + entry_marks + exit_marks + entry_rule).properties(height=280),
+        width="stretch",
+    )
+    st.caption(
+        "▲ grün = historischer Einstieg · ● Ausstieg gefärbt nach Grund (grün Ziel, rot Stop, "
+        "grau Zeit, blau Trailing) · gestrichelte Linie = Entry-Level des **aktuellen** Setups. "
+        "Punkte anklicken/hovern zeigt Datum und R-Ergebnis."
+    )
+
+
 def _render_setups(setups: list[dict], scan_day: str) -> None:
     if not setups:
         st.info(
@@ -115,6 +185,11 @@ def _render_setups(setups: list[dict], scan_day: str) -> None:
                 with st.expander(f"🎓 Wie die Note {grade} zustande kommt"):
                     for reason in grade_reasons:
                         st.markdown(f"- {reason}")
+
+            history_trades = s.get("history_trades") or []
+            if history_trades:
+                with st.expander(f"📉 Chart: wie die Strategie auf {s['ticker']} historisch lief", expanded=(i == 1)):
+                    _render_history_chart(s["ticker"], s["entry"], history_trades)
 
             pf = s.get("profit_factor")
             st.caption(
