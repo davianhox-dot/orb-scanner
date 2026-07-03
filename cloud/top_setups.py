@@ -63,6 +63,7 @@ class TopSetup:
     grade_points: float = 0.0
     grade_reasons: list[str] = field(default_factory=list)
     score_adjusted: float = 0.0
+    history_trades: list[dict] = field(default_factory=list)  # past backtest trades, for the signal-history chart
     pro_factors: list[str] = field(default_factory=list)
     risk_factors: list[str] = field(default_factory=list)
     news: list[dict] = field(default_factory=list)
@@ -145,6 +146,17 @@ def find_top_setups(
             entry=hit.entry, stop=hit.stop, target=hit.target,
             max_holding_days=config.exit_rules.max_holding_days,
         )
+        history_trades = [
+            {
+                "entry_date": t.entry_time.date().isoformat(),
+                "exit_date": t.exit_time.date().isoformat(),
+                "entry": round(t.entry_price, 2),
+                "exit": round(t.exit_price, 2),
+                "r": round(t.r_multiple, 2),
+                "reason": t.exit_reason,
+            }
+            for t in bt.trades
+        ]
 
         candidates.append(
             TopSetup(
@@ -167,6 +179,7 @@ def find_top_setups(
                 grade_points=g.points,
                 grade_reasons=g.reasons,
                 score_adjusted=round(max(0.0, base_score + regime.score_adjust), 1),
+                history_trades=history_trades,
             )
         )
 
