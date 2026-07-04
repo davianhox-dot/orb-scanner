@@ -239,6 +239,8 @@ def parameter_robustness(
         if base_val and base_val != 0:
             if spec.path == ("exit", "trailing_pct") and not config.exit_rules.trailing_stop:
                 continue
+            if spec.path == ("exit", "indicator_exit_period") and not config.exit_rules.indicator_exit:
+                continue
             active_specs.append((spec, base_val))
 
     total_runs = len(active_specs) * len(perturbations)
