@@ -71,6 +71,41 @@ CONDITION_CATALOG: dict[str, dict] = {
         "label": "Bullish candle (close above open)",
         "params": {},
     },
+    "ema_cross_above_ema": {
+        "label": "Fast EMA crosses above slow EMA (event)",
+        "params": {
+            "fast_period": {"label": "Fast EMA period", "default": 50, "min": 2, "max": 300},
+            "slow_period": {"label": "Slow EMA period", "default": 200, "min": 2, "max": 300},
+        },
+    },
+    "strong_prior_run": {
+        "label": "Strong prior run-up (min % gain over N days)",
+        "params": {
+            "lookback": {"label": "Lookback days", "default": 20, "min": 5, "max": 120},
+            "min_gain_pct": {"label": "Min gain (%)", "default": 30.0, "min": 5.0, "max": 300.0},
+        },
+    },
+    "range_contraction": {
+        "label": "Volatility contraction (recent range tighter than prior)",
+        "params": {
+            "recent_days": {"label": "Recent window (days)", "default": 5, "min": 3, "max": 30},
+            "prior_days": {"label": "Prior window (days)", "default": 15, "min": 5, "max": 90},
+            "max_ratio_pct": {"label": "Recent range ≤ % of prior range", "default": 60.0, "min": 10.0, "max": 100.0},
+        },
+    },
+    "gap_up": {
+        "label": "Gap up (open above prior close by min %)",
+        "params": {
+            "min_gap_pct": {"label": "Min gap (%)", "default": 3.0, "min": 0.5, "max": 50.0},
+        },
+    },
+    "bollinger_bounce": {
+        "label": "Bollinger bounce (dip below lower band, close back above)",
+        "params": {
+            "period": {"label": "Band period", "default": 20, "min": 5, "max": 100},
+            "num_std": {"label": "Std deviations", "default": 2.0, "min": 1.0, "max": 4.0},
+        },
+    },
     "rsi_above": {
         "label": "RSI above value",
         "params": {
@@ -243,6 +278,55 @@ def evaluate_condition(cond: Condition, cache: IndicatorCache, i: int) -> bool |
 
     if t == "bullish_candle":
         return bars[i].close > bars[i].open
+
+    if t == "ema_cross_above_ema":
+        fast = cache.ema(int(p["fast_period"]))
+        slow = cache.ema(int(p["slow_period"]))
+        if i < 1 or None in (fast[i], slow[i], fast[i - 1], slow[i - 1]):
+            return None
+        return fast[i - 1] <= slow[i - 1] and fast[i] > slow[i]
+
+    if t == "strong_prior_run":
+        lookback = int(p.get("lookback", 20))
+        if i < lookback:
+            return None
+        base_close = bars[i - lookback].close
+        if base_close <= 0:
+            return False
+        gain_pct = (bars[i].close - base_close) / base_close * 100
+        return gain_pct >= float(p.get("min_gain_pct", 30.0))
+
+    if t == "range_contraction":
+        recent_n = int(p.get("recent_days", 5))
+        prior_n = int(p.get("prior_days", 15))
+        if i + 1 < recent_n + prior_n:
+            return None
+        recent = bars[i - recent_n + 1 : i + 1]
+        prior = bars[i - recent_n - prior_n + 1 : i - recent_n + 1]
+        recent_range = max(b.high for b in recent) - min(b.low for b in recent)
+        prior_range = max(b.high for b in prior) - min(b.low for b in prior)
+        if prior_range <= 0:
+            return False
+        return recent_range / prior_range * 100 <= float(p.get("max_ratio_pct", 60.0))
+
+    if t == "gap_up":
+        if i < 1:
+            return None
+        prev_close = bars[i - 1].close
+        if prev_close <= 0:
+            return False
+        gap_pct = (bars[i].open - prev_close) / prev_close * 100
+        return gap_pct >= float(p.get("min_gap_pct", 3.0))
+
+    if t == "bollinger_bounce":
+        upper, middle, lower = cache.bollinger(int(p.get("period", 20)), float(p.get("num_std", 2.0)))
+        if i < 1 or lower[i] is None or lower[i - 1] is None:
+            return None
+        # Close-based on purpose: a mere intraday wick below the band fires
+        # constantly in tight ranges; a CLOSE below it is a real washout.
+        dipped_below = bars[i - 1].close < lower[i - 1]
+        back_above = bars[i].close > lower[i]
+        return dipped_below and back_above
 
     if t == "rsi_above":
         series = cache.rsi(int(p["period"]))
