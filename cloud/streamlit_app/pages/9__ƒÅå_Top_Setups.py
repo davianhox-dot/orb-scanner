@@ -32,7 +32,7 @@ from sqlalchemy import select
 from cloud.config import get_settings
 from cloud.db import SavedStrategy, TopSetupRun, get_session_factory, init_db
 from cloud.historical_data import get_bars
-from cloud.indicators import ema as indicator_ema
+from cloud.indicators import bollinger_bands as indicator_bollinger, ema as indicator_ema
 from cloud.strategy_presets import PRESET_NAMES, config_from_dict, get_preset
 from cloud.strategy_scanner import MAX_UNIVERSE, build_universe, fetch_grouped_daily, fetch_history
 from cloud.top_setups import LOW_SAMPLE_THRESHOLD, find_top_setups
@@ -90,8 +90,8 @@ def _render_regime(regime: dict | None) -> None:
 
 
 _REASON_COLORS = alt.Scale(
-    domain=["target", "stop", "time_exit", "trailing_stop"],
-    range=["#2e7d32", "#c62828", "#757575", "#1565c0"],
+    domain=["target", "stop", "time_exit", "trailing_stop", "indicator_exit"],
+    range=["#2e7d32", "#c62828", "#757575", "#1565c0", "#6a1b9a"],
 )
 
 
@@ -114,7 +114,7 @@ def _render_history_chart(
 
     # Fetch extra lead-in history so long EMAs (e.g. EMA200) are accurate
     # from the left edge of the chart instead of starting mid-way.
-    max_ema_period = max((o.get("period", 0) for o in (overlays or []) if o.get("kind") == "ema"), default=0)
+    max_ema_period = max((o.get("period", 0) for o in (overlays or []) if o.get("kind") in ("ema", "bollinger")), default=0)
     max_lookback = max((o.get("lookback", 0) for o in (overlays or []) if o.get("kind") != "ema"), default=0)
     lead_in_days = int(max(max_ema_period, max_lookback) * 1.6) + 10
 
@@ -149,6 +149,15 @@ def _render_history_chart(
                 d = b.timestamp.date().isoformat()
                 if v is not None and d >= visible_from:
                     ema_rows.append({"Datum": d, "Wert": round(v, 2), "Linie": f"EMA{period}"})
+        elif o.get("kind") == "bollinger":
+            period = int(o.get("period", 20))
+            num_std = float(o.get("num_std", 2.0))
+            upper, middle, lower = indicator_bollinger(closes, period, num_std)
+            for b, u, lo in zip(bars, upper, lower):
+                d = b.timestamp.date().isoformat()
+                if u is not None and d >= visible_from:
+                    range_rows.append({"Datum": d, "Wert": round(u, 2), "Linie": f"BB{period} oben"})
+                    range_rows.append({"Datum": d, "Wert": round(lo, 2), "Linie": f"BB{period} unten"})
         elif o.get("kind") in ("rolling_high", "rolling_low"):
             lookback = int(o["lookback"])
             is_high = o["kind"] == "rolling_high"
