@@ -86,7 +86,7 @@ def _overlays_from_config(config: StrategyConfig) -> list[dict]:
         p = cond.params
         if cond.type in ("above_ema", "ema_rising", "pullback_to_ema"):
             add("ema", period=int(p.get("period", 20)))
-        elif cond.type == "ema_above_ema":
+        elif cond.type in ("ema_above_ema", "ema_cross_above_ema"):
             add("ema", period=int(p.get("fast_period", 20)))
             add("ema", period=int(p.get("slow_period", 50)))
         elif cond.type == "pullback_to_any_ema":
@@ -97,6 +97,11 @@ def _overlays_from_config(config: StrategyConfig) -> list[dict]:
         elif cond.type == "consolidation_breakout":
             add("rolling_high", lookback=int(p.get("lookback", 15)))
             add("rolling_low", lookback=int(p.get("lookback", 15)))
+        elif cond.type == "bollinger_bounce":
+            add("bollinger", period=int(p.get("period", 20)), num_std=float(p.get("num_std", 2.0)))
+
+    if config.exit_rules.indicator_exit:
+        add("ema", period=int(config.exit_rules.indicator_exit_period))
 
     return overlays
     pro_factors: list[str] = field(default_factory=list)
