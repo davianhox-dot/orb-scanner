@@ -64,6 +64,9 @@ def _load_config_into_session(cfg: StrategyConfig) -> None:
     st.session_state["sb_trailing"] = cfg.exit_rules.trailing_stop
     st.session_state["sb_trailing_pct"] = float(cfg.exit_rules.trailing_pct)
     st.session_state["sb_max_holding"] = int(cfg.exit_rules.max_holding_days)
+    st.session_state["sb_ind_exit"] = cfg.exit_rules.indicator_exit
+    st.session_state["sb_ind_exit_type"] = cfg.exit_rules.indicator_exit_type
+    st.session_state["sb_ind_exit_period"] = int(cfg.exit_rules.indicator_exit_period)
     st.session_state["sb_sizing_method"] = cfg.position_sizing.method
     st.session_state["sb_sizing_value"] = float(cfg.position_sizing.value)
     st.session_state["sb_capital"] = float(cfg.initial_capital)
@@ -190,6 +193,20 @@ trailing_pct = tr2.number_input("Trailing (%)", min_value=0.5, max_value=50.0, k
 st.session_state.setdefault("sb_max_holding", 30)
 max_holding_days = tr3.number_input("Max holding period (days)", min_value=1, max_value=250, key="sb_max_holding")
 
+ie1, ie2, ie3 = st.columns(3)
+indicator_exit = ie1.checkbox("Use indicator exit (evaluated on close)", key="sb_ind_exit")
+indicator_exit_type = ie2.selectbox(
+    "Indicator exit type",
+    ["close_below_ema", "close_above_ema"],
+    format_func=lambda v: {
+        "close_below_ema": "Exit when close falls below EMA (trend exit)",
+        "close_above_ema": "Exit when close rises above EMA (mean-reversion profit exit)",
+    }[v],
+    key="sb_ind_exit_type",
+)
+st.session_state.setdefault("sb_ind_exit_period", 10)
+indicator_exit_period = ie3.number_input("Indicator exit EMA period", min_value=2, max_value=300, key="sb_ind_exit_period")
+
 st.divider()
 st.subheader("Position Sizing")
 p1, p2 = st.columns(2)
@@ -225,6 +242,8 @@ def _current_config() -> StrategyConfig:
             stop_type=stop_type, stop_value=stop_value, stop_atr_period=int(stop_atr_period),
             target_type=target_type, target_value=target_value,
             trailing_stop=trailing_stop, trailing_pct=trailing_pct, max_holding_days=int(max_holding_days),
+            indicator_exit=indicator_exit, indicator_exit_type=indicator_exit_type,
+            indicator_exit_period=int(indicator_exit_period),
         ),
         position_sizing=PositionSizingConfig(method=sizing_method, value=sizing_value),
         initial_capital=initial_capital,
