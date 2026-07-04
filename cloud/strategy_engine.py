@@ -40,6 +40,13 @@ class ExitRuleConfig:
     trailing_stop: bool = False
     trailing_pct: float = 8.0
     max_holding_days: int = 30
+    # Indicator-based exit, evaluated on each day's CLOSE (after intraday
+    # stop/target checks): "close_below_ema" = protective trend exit,
+    # "close_above_ema" = mean-reversion profit exit (e.g. Connors RSI(2)
+    # exits when price closes back above a short EMA).
+    indicator_exit: bool = False
+    indicator_exit_type: str = "close_below_ema"  # "close_below_ema" | "close_above_ema"
+    indicator_exit_period: int = 10
 
 
 @dataclass
@@ -168,6 +175,18 @@ def _find_trades_for_ticker(
                     exit_price, exit_time, exit_reason = target_price, bar.timestamp, "target"
                     exit_index = j
                     break
+                if config.exit_rules.indicator_exit:
+                    ema_series = cache.ema(int(config.exit_rules.indicator_exit_period))
+                    ema_val = ema_series[j]
+                    if ema_val is not None:
+                        exit_type = config.exit_rules.indicator_exit_type
+                        triggered = (
+                            bar.close < ema_val if exit_type == "close_below_ema" else bar.close > ema_val
+                        )
+                        if triggered:
+                            exit_price, exit_time, exit_reason = bar.close, bar.timestamp, "indicator_exit"
+                            exit_index = j
+                            break
 
             if exit_price is None:
                 last_index = min(i + 1 + config.exit_rules.max_holding_days, n - 1)
