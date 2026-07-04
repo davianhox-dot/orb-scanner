@@ -89,7 +89,7 @@ def list_tunable_params(config: StrategyConfig) -> list[ParamSpec]:
             if isinstance(pval, (int, float)):
                 specs.append(ParamSpec(label=f"Trend {i + 1} ({cond.type}) · {pname}", path=("trend", i, pname)))
 
-    for fname in ("stop_value", "target_value", "trailing_pct", "max_holding_days"):
+    for fname in ("stop_value", "target_value", "trailing_pct", "max_holding_days", "indicator_exit_period"):
         specs.append(ParamSpec(label=f"Exit · {fname}", path=("exit", fname)))
 
     specs.append(ParamSpec(label="Position sizing · value", path=("sizing", "value")))
@@ -109,7 +109,7 @@ def apply_param(config: StrategyConfig, path: tuple, value: float) -> None:
         config.trend_filters[idx].params[pname] = int(value) if isinstance(original, int) else value
     elif kind == "exit":
         _, fname = path
-        if fname == "max_holding_days":
+        if fname in ("max_holding_days", "indicator_exit_period"):
             setattr(config.exit_rules, fname, int(value))
         else:
             setattr(config.exit_rules, fname, value)
