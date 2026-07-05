@@ -10,7 +10,7 @@ Postgres-specific beyond the URL you provide.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from cloud.config import Settings
@@ -183,6 +183,33 @@ class OptimizationRun(Base):
     param_specs: Mapped[list] = mapped_column(JSON, default=list)
     rank_by: Mapped[str] = mapped_column(String(32), default="profit_factor")
     results: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class TrackedPosition(Base):
+    """A real position the user actually holds. The nightly monitor walks
+    each open position's daily bars since entry and reports the FIRST
+    triggered event (stop touched / target reached / indicator exit fired /
+    max holding days elapsed) — positions are never auto-closed, because we
+    don't know the user's real fills; the user closes them manually."""
+
+    __tablename__ = "tracked_positions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    entry_price: Mapped[float] = mapped_column(Float)
+    stop_price: Mapped[float] = mapped_column(Float)
+    target_price: Mapped[float] = mapped_column(Float)
+    entry_date: Mapped[str] = mapped_column(String(10))
+    shares: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = not specified
+    strategy_name: Mapped[str] = mapped_column(String(128), default="")
+    indicator_exit: Mapped[bool] = mapped_column(Boolean, default=False)
+    indicator_exit_type: Mapped[str] = mapped_column(String(32), default="close_below_ema")
+    indicator_exit_period: Mapped[int] = mapped_column(Integer, default=10)
+    max_holding_days: Mapped[int] = mapped_column(Integer, default=0)  # 0 = no limit
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open | closed
+    last_signal: Mapped[str] = mapped_column(Text, default="")
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
