@@ -89,6 +89,23 @@ def _render_regime(regime: dict | None) -> None:
         st.success(text) if status == "green" else st.caption(text)
 
 
+def _render_strategy_stats(stats: list | None) -> None:
+    """Transparency table: proves every strategy was scanned and shows which
+    ones produced how many signals. Also honestly reveals when one loose
+    strategy floods the ranking."""
+    if not stats:
+        return
+    with st.expander(f"📊 Welche Strategie fand wie viele Signale? ({len(stats)} Strategien geprüft)"):
+        df = pd.DataFrame(
+            [{"Strategie": s["strategy"], "Signale heute": s["signals"], "Qualifiziert (Backtest bestanden)": s["qualified"]} for s in stats]
+        )
+        st.dataframe(df, width="stretch", hide_index=True)
+        st.caption(
+            "Jede Zeile wurde vollständig gescannt und jeder Treffer rückgetestet. 0 Signale ist bei "
+            "selektiven Strategien (Golden Cross, 52W-Hoch) an den meisten Tagen völlig normal."
+        )
+
+
 _REASON_COLORS = alt.Scale(
     domain=["target", "stop", "time_exit", "trailing_stop", "indicator_exit"],
     range=["#2e7d32", "#c62828", "#757575", "#1565c0", "#6a1b9a"],
@@ -262,6 +279,23 @@ def _render_setups(setups: list[dict], scan_day: str) -> None:
             c3.metric("Take Profit", f"${s['target']:.2f}")
             c4.metric("R:R", f"{s['risk_reward']:.1f}")
 
+            also = s.get("also_matched") or []
+            if also:
+                qualified = [o for o in also if o.get("qualified")]
+                signal_only = [o for o in also if not o.get("qualified")]
+                parts = []
+                if qualified:
+                    parts.append(
+                        "**"
+                        + "**, **".join(f"{o['strategy']} (Note {o.get('grade', '?')}, Score {o.get('score', 0):.0f})" for o in qualified)
+                        + "**"
+                    )
+                if signal_only:
+                    parts.append(", ".join(f"{o['strategy']} (Signal, aber Historie nicht qualifiziert)" for o in signal_only))
+                bonus = s.get("confluence_bonus", 0)
+                bonus_note = f" · Konfluenz-Bonus: +{bonus:.0f} Punkte" if bonus else ""
+                st.info(f"🔗 **Konfluenz** — diese Aktie ist heute außerdem Setup für: {' · '.join(parts)}{bonus_note}")
+
             grade_reasons = s.get("grade_reasons") or []
             if grade_reasons:
                 with st.expander(f"🎓 Wie die Note {grade} zustande kommt"):
@@ -325,6 +359,7 @@ if last_run is not None:
         f"Qualitätsfilter bestanden · Top {len(last_run.top)} angezeigt"
     )
     _render_regime((last_run.settings_used or {}).get("market_regime"))
+    _render_strategy_stats((last_run.settings_used or {}).get("strategy_stats"))
     _render_setups(last_run.top, last_run.scan_day)
     st.divider()
 else:
@@ -422,6 +457,7 @@ if st.button("🏆 Top Setups finden", type="primary"):
                                 "backtest_years": int(backtest_years), "min_trades": int(min_trades),
                                 "top_k": int(top_k), "strategies": chosen,
                                 "market_regime": result.market_regime,
+                                "strategy_stats": result.strategy_stats,
                             },
                             top=[s.__dict__ for s in result.top],
                             candidates_count=len(result.all_candidates),
@@ -439,6 +475,7 @@ if st.button("🏆 Top Setups finden", type="primary"):
 
         st.subheader(f"Ergebnis — {latest_day}")
         _render_regime(result.market_regime)
+        _render_strategy_stats(result.strategy_stats)
         _render_setups([s.__dict__ for s in result.top], str(latest_day))
 
         if result.all_candidates:
