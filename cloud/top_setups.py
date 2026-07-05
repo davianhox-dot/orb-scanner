@@ -149,6 +149,21 @@ def find_top_setups(
     from cloud.setup_grade import grade_setup
 
     result = TopSetupsResult()
+    # Realistic execution costs for every auto-backtest in the scan —
+    # env-overridable (TOPSETUPS_SLIPPAGE_PCT / TOPSETUPS_COMMISSION).
+    # Applied to copies; saved strategies/presets themselves stay untouched.
+    import copy as _copy
+    import os as _os
+    _slip = float(_os.environ.get("TOPSETUPS_SLIPPAGE_PCT", 0.1))
+    _comm = float(_os.environ.get("TOPSETUPS_COMMISSION", 1.0))
+    costed: list[tuple[str, StrategyConfig]] = []
+    for _name, _cfg in strategies:
+        _c = _copy.deepcopy(_cfg)
+        _c.slippage_pct = max(_c.slippage_pct, _slip)
+        _c.commission_per_order = max(_c.commission_per_order, _comm)
+        costed.append((_name, _c))
+    strategies = costed
+
     regime = compute_regime(spy_bars)
     result.market_regime = regime.to_dict()
     bt_end = date.today() - timedelta(days=1)
