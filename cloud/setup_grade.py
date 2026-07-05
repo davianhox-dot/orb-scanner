@@ -141,4 +141,30 @@ def grade_setup(
     reasons.append(f"Institutionelle Handelbarkeit {liq_points:.0f}/25 — {liq_note}.")
 
     points = round(tp_points + stop_points + rs_points + liq_points, 1)
+
+    # --- Weekly-trend confirmation (modifier, not a fifth 25-point bucket):
+    # a daily setup fighting a weekly downtrend starts with a headwind.
+    # Weekly closes = last close per ISO week; trend proxy = last weekly
+    # close vs its 10-week SMA. Downtrend costs 10 points; uptrend confirms
+    # at no cost (the four buckets already reward strength).
+    weekly_closes: list[float] = []
+    last_week_key: tuple[int, int] | None = None
+    for b in bars:
+        iso = b.timestamp.isocalendar()
+        key = (iso[0], iso[1])
+        if key != last_week_key:
+            weekly_closes.append(b.close)
+            last_week_key = key
+        else:
+            weekly_closes[-1] = b.close
+    if len(weekly_closes) >= 11:
+        sma10w = sum(weekly_closes[-10:]) / 10
+        if weekly_closes[-1] >= sma10w:
+            reasons.append("Wochenchart-Bestätigung ±0 — der übergeordnete Wochentrend zeigt aufwärts (Wochenschluss über 10-Wochen-Schnitt).")
+        else:
+            points = round(max(0.0, points - 10.0), 1)
+            reasons.append(
+                "Wochenchart-Bestätigung −10 — der Wochentrend zeigt abwärts (Wochenschluss unter "
+                "10-Wochen-Schnitt); ein Tages-Setup gegen den Wochentrend startet mit Gegenwind."
+            )
     return SetupGrade(grade=_grade_letter(points), points=points, reasons=reasons)
