@@ -30,7 +30,7 @@ import streamlit as st
 from sqlalchemy import select
 
 from cloud.config import get_settings
-from cloud.db import SavedStrategy, TopSetupRun, get_session_factory, init_db
+from cloud.db import AppSetting, SavedStrategy, TopSetupRun, get_session_factory, init_db
 from cloud.historical_data import get_bars
 from cloud.indicators import bollinger_bands as indicator_bollinger, ema as indicator_ema
 from cloud.strategy_presets import PRESET_NAMES, config_from_dict, get_preset
@@ -66,6 +66,39 @@ st.info(
     "nachweislich auswählt: Liquidität, relative Stärke vs. Markt, Akkumulation, realistische "
     "Ziele, saubere Stops."
 )
+
+def _load_account() -> tuple[float, float]:
+    with Session() as db:
+        row = db.get(AppSetting, "account")
+    if row and isinstance(row.value, dict):
+        return float(row.value.get("size", 0.0)), float(row.value.get("risk_pct", 1.0))
+    return 0.0, 1.0
+
+
+def _save_account(size: float, risk_pct: float) -> None:
+    with Session() as db:
+        row = db.get(AppSetting, "account")
+        if row is None:
+            row = AppSetting(key="account", value={})
+            db.add(row)
+        row.value = {"size": size, "risk_pct": risk_pct}
+        db.commit()
+
+
+_acct_size, _acct_risk = _load_account()
+with st.expander("⚙️ Konto für Positionsgrößen-Rechner" + (f" — ${_acct_size:,.0f}, {_acct_risk}% Risiko/Trade" if _acct_size else " (nicht gesetzt)")):
+    a1, a2, a3 = st.columns([1.5, 1, 1])
+    new_size = a1.number_input("Kontogröße ($)", min_value=0.0, value=_acct_size, step=500.0)
+    new_risk = a2.number_input("Risiko pro Trade (%)", min_value=0.1, max_value=5.0, value=_acct_risk, step=0.1)
+    if a3.button("Speichern", key="save_account"):
+        _save_account(float(new_size), float(new_risk))
+        st.success("Gespeichert — die Setup-Karten zeigen ab jetzt konkrete Stückzahlen.")
+        st.rerun()
+    st.caption(
+        "Stückzahl = (Konto × Risiko%) ÷ (Entry − Stop). Riskiert wird also immer derselbe "
+        "Kontoanteil, egal wie weit der Stop ist — weiter Stop heißt automatisch kleinere Position."
+    )
+
 
 _GRADE_STYLE = {"A": ("🟢", "green"), "B": ("🟡", "orange"), "C": ("🔴", "red")}
 _REGIME_LABELS = {
@@ -278,6 +311,28 @@ def _render_setups(setups: list[dict], scan_day: str) -> None:
             c2.metric("Stop Loss", f"${s['stop']:.2f}")
             c3.metric("Take Profit", f"${s['target']:.2f}")
             c4.metric("R:R", f"{s['risk_reward']:.1f}")
+
+            if _acct_size > 0:
+                risk_dollars = _acct_size * _acct_risk / 100
+                per_share_risk = s["entry"] - s["stop"]
+                if per_share_risk > 0:
+                    shares = int(risk_dollars / per_share_risk)
+                    cost = shares * s["entry"]
+                    if shares < 1:
+                        st.caption("📐 Positionsgröße: Stop zu weit für dein Risikobudget — selbst 1 Stück überschreitet es.")
+                    elif cost > _acct_size:
+                        afford = int(_acct_size / s["entry"])
+                        st.caption(
+                            f"📐 **{shares} Stück** (Risiko ${risk_dollars:,.0f}) — aber Positionswert "
+                            f"${cost:,.0f} übersteigt dein Konto; maximal leistbar: {afford} Stück "
+                            f"(dann Risiko nur ${afford * per_share_risk:,.0f})."
+                        )
+                    else:
+                        st.caption(
+                            f"📐 Positionsgröße bei {_acct_risk}% Risiko: **{shares} Stück** ≈ "
+                            f"${cost:,.0f} Positionswert ({cost / _acct_size * 100:.0f}% vom Konto) · "
+                            f"Risiko ${shares * per_share_risk:,.0f} bis zum Stop."
+                        )
 
             also = s.get("also_matched") or []
             if also:
