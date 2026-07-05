@@ -67,6 +67,8 @@ def _load_config_into_session(cfg: StrategyConfig) -> None:
     st.session_state["sb_ind_exit"] = cfg.exit_rules.indicator_exit
     st.session_state["sb_ind_exit_type"] = cfg.exit_rules.indicator_exit_type
     st.session_state["sb_ind_exit_period"] = int(cfg.exit_rules.indicator_exit_period)
+    st.session_state["sb_slippage"] = float(cfg.slippage_pct)
+    st.session_state["sb_commission"] = float(cfg.commission_per_order)
     st.session_state["sb_sizing_method"] = cfg.position_sizing.method
     st.session_state["sb_sizing_value"] = float(cfg.position_sizing.value)
     st.session_state["sb_capital"] = float(cfg.initial_capital)
@@ -207,6 +209,18 @@ indicator_exit_type = ie2.selectbox(
 st.session_state.setdefault("sb_ind_exit_period", 10)
 indicator_exit_period = ie3.number_input("Indicator exit EMA period", min_value=2, max_value=300, key="sb_ind_exit_period")
 
+cost1, cost2 = st.columns(2)
+st.session_state.setdefault("sb_slippage", 0.0)
+slippage_pct = cost1.number_input(
+    "Slippage (% per fill)", min_value=0.0, max_value=2.0, step=0.05, key="sb_slippage",
+    help="Worsens every fill (buy higher, sell lower). 0.1% is a reasonable value for liquid stocks; more for thin ones.",
+)
+st.session_state.setdefault("sb_commission", 0.0)
+commission = cost2.number_input(
+    "Commission per order ($)", min_value=0.0, max_value=50.0, step=0.5, key="sb_commission",
+    help="Charged twice per round trip (buy + sell). E.g. $1 per order.",
+)
+
 st.divider()
 st.subheader("Position Sizing")
 p1, p2 = st.columns(2)
@@ -238,6 +252,8 @@ def _current_config() -> StrategyConfig:
         entry_conditions=entry_conditions,
         entry_logic=entry_logic,
         entry_fill=entry_fill,
+        slippage_pct=float(slippage_pct),
+        commission_per_order=float(commission),
         exit_rules=ExitRuleConfig(
             stop_type=stop_type, stop_value=stop_value, stop_atr_period=int(stop_atr_period),
             target_type=target_type, target_value=target_value,
