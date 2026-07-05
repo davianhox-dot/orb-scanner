@@ -186,6 +186,18 @@ class OptimizationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class AppSetting(Base):
+    """Tiny key-value store for user-level settings (e.g. account size for
+    the position-size calculator) — a new table on purpose, since adding
+    columns to existing tables isn't supported by create_all."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 class TrackedPosition(Base):
     """A real position the user actually holds. The nightly monitor walks
     each open position's daily bars since entry and reports the FIRST
