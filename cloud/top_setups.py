@@ -65,6 +65,10 @@ class TopSetup:
     score_adjusted: float = 0.0
     history_trades: list[dict] = field(default_factory=list)  # past backtest trades, for the signal-history chart
     overlays: list[dict] = field(default_factory=list)  # indicator overlays for the chart, derived from the strategy
+    # Confluence: other strategies that ALSO fired on this ticker today.
+    # Entries: {"strategy": name, "qualified": bool, "score": float|None, "grade": str|None}
+    also_matched: list[dict] = field(default_factory=list)
+    confluence_bonus: float = 0.0
 
 
 def _overlays_from_config(config: StrategyConfig) -> list[dict]:
@@ -116,6 +120,8 @@ class TopSetupsResult:
     hits_scanned: int = 0
     hits_rejected: int = 0
     market_regime: dict = field(default_factory=dict)
+    # Per-strategy transparency: [{"strategy": name, "signals": n, "qualified": m}]
+    strategy_stats: list[dict] = field(default_factory=list)
 
 
 def composite_score(metrics: dict) -> float:
@@ -224,9 +230,53 @@ def find_top_setups(
             )
         )
 
-    # --- 4+5. rank (grade first, then regime-adjusted score), dedup, top K ---
+    # --- 4. Confluence: a ticker firing for MULTIPLE strategies on the same
+    # day is independent confirmation. Each candidate learns which other
+    # strategies also matched its ticker (qualified or not), and gets a
+    # small, transparent score bonus per additional QUALIFIED strategy
+    # (+5 each, capped at +10 — confirmation helps, but shouldn't let a
+    # C-grade pile beat a clean single-strategy A-setup).
+    signals_by_ticker: dict[str, list[str]] = {}
+    for name, _, hit in hits:
+        signals_by_ticker.setdefault(hit.ticker, []).append(name)
+    qualified_by_ticker: dict[str, list[TopSetup]] = {}
+    for c in candidates:
+        qualified_by_ticker.setdefault(c.ticker, []).append(c)
+
+    for c in candidates:
+        others: list[dict] = []
+        for other in qualified_by_ticker.get(c.ticker, []):
+            if other.strategy_name != c.strategy_name:
+                others.append({
+                    "strategy": other.strategy_name, "qualified": True,
+                    "score": other.score, "grade": other.grade,
+                })
+        qualified_names = {o["strategy"] for o in others} | {c.strategy_name}
+        for sig_name in signals_by_ticker.get(c.ticker, []):
+            if sig_name not in qualified_names and not any(o["strategy"] == sig_name for o in others):
+                others.append({"strategy": sig_name, "qualified": False, "score": None, "grade": None})
+        c.also_matched = others
+        c.confluence_bonus = min(5.0 * sum(1 for o in others if o["qualified"]), 10.0)
+        c.score_adjusted = round(c.score_adjusted + c.confluence_bonus, 1)
+
+    # --- Per-strategy transparency stats ---
+    signal_counts: dict[str, int] = {}
+    for name, _, _hit in hits:
+        signal_counts[name] = signal_counts.get(name, 0) + 1
+    qualified_counts: dict[str, int] = {}
+    for c in candidates:
+        qualified_counts[c.strategy_name] = qualified_counts.get(c.strategy_name, 0) + 1
+    result.strategy_stats = [
+        {"strategy": name, "signals": signal_counts.get(name, 0), "qualified": qualified_counts.get(name, 0)}
+        for name, _cfg in strategies
+        if _cfg.entry_conditions
+    ]
+
+    # --- 5. rank (grade first, then bonus-adjusted score, then sample size
+    # as tiebreaker: identical scores are common when few-trade records are
+    # perfect, and more historical trades = more trustworthy), dedup, top K ---
     grade_order = {"A": 0, "B": 1, "C": 2}
-    candidates.sort(key=lambda c: (grade_order.get(c.grade, 3), -c.score_adjusted))
+    candidates.sort(key=lambda c: (grade_order.get(c.grade, 3), -c.score_adjusted, -c.total_trades))
     result.all_candidates = candidates
 
     seen_tickers: set[str] = set()
@@ -267,8 +317,12 @@ def format_alert_message(top: list[TopSetup], scan_day: str, regime: dict | None
     lines = [f"{header}:"]
     for i, s in enumerate(top, start=1):
         flag = " ⚠️wenig Historie" if s.low_sample else ""
+        confl = ""
+        qualified_others = [o["strategy"] for o in (s.also_matched or []) if o.get("qualified")]
+        if qualified_others:
+            confl = f" 🔗Konfluenz mit: {', '.join(qualified_others)}"
         lines.append(
-            f"{i}. {s.ticker} · Note {s.grade} · {s.strategy_name} · Score {s.score_adjusted:.0f}{flag}\n"
+            f"{i}. {s.ticker} · Note {s.grade} · {s.strategy_name} · Score {s.score_adjusted:.0f}{flag}{confl}\n"
             f"   Entry >{s.entry:.2f} · SL {s.stop:.2f} · TP {s.target:.2f} (R:R {s.risk_reward:.1f})\n"
             f"   Historie: {s.total_trades} Trades, {s.win_rate_pct:.0f}% WR, PF "
             f"{'∞' if s.profit_factor is None else f'{s.profit_factor:.2f}'}"
