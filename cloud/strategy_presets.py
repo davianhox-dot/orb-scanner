@@ -19,6 +19,8 @@ def config_to_dict(config: StrategyConfig) -> dict:
         "exit_rules": config.exit_rules.__dict__,
         "position_sizing": config.position_sizing.__dict__,
         "initial_capital": config.initial_capital,
+        "slippage_pct": config.slippage_pct,
+        "commission_per_order": config.commission_per_order,
     }
 
 
@@ -32,6 +34,8 @@ def config_from_dict(d: dict) -> StrategyConfig:
         exit_rules=ExitRuleConfig(**d.get("exit_rules", {})),
         position_sizing=PositionSizingConfig(**d.get("position_sizing", {})),
         initial_capital=d.get("initial_capital", 10_000.0),
+        slippage_pct=d.get("slippage_pct", 0.0),
+        commission_per_order=d.get("commission_per_order", 0.0),
     )
 
 
