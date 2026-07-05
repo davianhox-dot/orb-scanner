@@ -105,6 +105,7 @@ def run() -> int:
                     "min_trades": min_trades, "top_k": top_k,
                     "strategies": [n for n, _ in strategies],
                     "market_regime": result.market_regime,
+                    "strategy_stats": result.strategy_stats,
                 },
                 top=[s.__dict__ for s in result.top],
                 candidates_count=len(result.all_candidates),
