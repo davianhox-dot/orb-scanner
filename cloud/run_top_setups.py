@@ -131,6 +131,22 @@ def run() -> int:
     else:
         logger.info("No qualifying setups today — no alert sent.")
 
+    # --- Position monitor: check the user's REAL open positions ---
+    from cloud.position_monitor import check_open_positions, format_position_alert
+
+    with Session() as db:
+        checks = check_open_positions(db, settings)
+    logger.info("Position monitor: %d open position(s) checked, %d need action.",
+                len(checks), sum(1 for c in checks if c.action_needed))
+    pos_message = format_position_alert(checks, str(latest_day))
+    if pos_message:
+        sent = {
+            "discord": send_discord(settings, pos_message),
+            "telegram": send_telegram(settings, pos_message),
+            "email": send_email(settings, f"Positions-Check {latest_day}", pos_message),
+        }
+        logger.info("Position alerts sent: %s", {k: v for k, v in sent.items()})
+
     return 0
 
 
