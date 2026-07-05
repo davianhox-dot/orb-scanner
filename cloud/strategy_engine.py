@@ -73,6 +73,13 @@ class StrategyConfig:
     exit_rules: ExitRuleConfig = field(default_factory=ExitRuleConfig)
     position_sizing: PositionSizingConfig = field(default_factory=PositionSizingConfig)
     initial_capital: float = 10_000.0
+    # Execution costs. Defaults are 0 so existing verified results stay
+    # byte-identical; the Top-Setups scanner applies realistic values
+    # (0.1% slippage, $1/order) on top, and the Builder exposes both.
+    # slippage_pct worsens EVERY fill: entry fills higher, exits fill lower.
+    # commission_per_order is charged twice per round trip (buy + sell).
+    slippage_pct: float = 0.0
+    commission_per_order: float = 0.0
 
 
 def _resolve_stop(entry_price: float, exit_rules: ExitRuleConfig, cache: IndicatorCache, i: int) -> float | None:
@@ -194,8 +201,15 @@ def _find_trades_for_ticker(
                 exit_price, exit_time, exit_reason = last_bar.close, last_bar.timestamp, "time_exit"
                 exit_index = last_index
 
-            pnl = (exit_price - entry_price) * shares
-            r_multiple = (exit_price - entry_price) / risk_per_share
+            # Execution costs: slippage worsens both fills (buy higher, sell
+            # lower), commission is charged per order (2x per round trip).
+            # Stop/target levels and share sizing stay anchored to the
+            # INTENDED entry — you place orders before knowing your slippage.
+            slip = config.slippage_pct / 100
+            eff_entry = entry_price * (1 + slip)
+            eff_exit = exit_price * (1 - slip)
+            pnl = (eff_exit - eff_entry) * shares - 2 * config.commission_per_order
+            r_multiple = (pnl / shares) / risk_per_share if shares > 0 else 0.0
 
             trades.append(
                 Trade(
