@@ -23,6 +23,7 @@ Deliberate honesty rules:
 """
 import logging
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 import httpx
 
@@ -65,6 +66,35 @@ def _fetch_recent_news(settings: Settings, ticker: str, limit: int = 5) -> list[
     except httpx.HTTPError as exc:
         logger.warning("News fetch failed for %s: %s", ticker, exc)
         return []
+
+
+def _estimate_next_earnings_days(settings: Settings, ticker: str) -> int | None:
+    """Best-effort ESTIMATE of days until the next earnings report:
+    Polygon's Stocks Starter plan has no forward earnings calendar, but it
+    does expose past quarterly financials. Companies report on a ~90-day
+    cadence, so last quarterly filing + ~91 days is a usable estimate —
+    clearly labeled as such wherever it's shown. Returns None if
+    financials are unavailable (plan limits, foreign issuers, errors)."""
+    if not settings.POLYGON_API_KEY:
+        return None
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(
+                f"{BASE_URL}/vX/reference/financials",
+                params={"ticker": ticker, "timeframe": "quarterly", "limit": 1,
+                        "order": "desc", "sort": "filing_date", "apiKey": settings.POLYGON_API_KEY},
+            )
+            if resp.status_code != 200:
+                return None
+            results = resp.json().get("results", [])
+            if not results or not results[0].get("filing_date"):
+                return None
+            last_filing = date.fromisoformat(results[0]["filing_date"])
+            estimated_next = last_filing + timedelta(days=91)
+            return (estimated_next - date.today()).days
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Earnings estimate failed for %s: %s", ticker, exc)
+        return None
 
 
 def _consolidation_length(bars: list[HistoricalBar], i: int, max_range_pct: float = 12.0) -> tuple[int, float]:
@@ -223,6 +253,15 @@ def build_rationale(
     else:
         r.risk_factors.append(
             "Keine aktuellen News gefunden — rein technisches Setup ohne fundamentalen Rückenwind."
+        )
+
+    # --- Earnings proximity (ESTIMATE) ---
+    days_to_earnings = _estimate_next_earnings_days(settings, ticker)
+    if days_to_earnings is not None and -5 <= days_to_earnings <= 10:
+        r.risk_factors.append(
+            f"⚠️ Earnings vermutlich in ~{max(days_to_earnings, 0)} Tagen (GESCHÄTZT aus dem letzten "
+            f"Quartalsbericht + ~90 Tage — kein offizieller Termin!). Ein Earnings-Gap kann jedes "
+            f"Swing-Setup über Nacht zerschießen; Positionsgröße reduzieren oder Termin abwarten."
         )
 
     return r
