@@ -142,6 +142,7 @@ def find_top_setups(
     backtest_years: int = 2,
     min_trades: int = 5,
     top_k: int = 3,
+    max_per_strategy: int = 1,
     spy_bars: list[HistoricalBar] | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> TopSetupsResult:
@@ -303,14 +304,34 @@ def find_top_setups(
     candidates.sort(key=lambda c: (grade_order.get(c.grade, 3), -c.score_adjusted, -c.total_trades))
     result.all_candidates = candidates
 
+    # Selection with BOTH constraints applied simultaneously over the full
+    # candidate list: (a) each ticker at most once, (b) at most
+    # `max_per_strategy` picks per strategy. Order matters: collapsing to
+    # best-per-ticker FIRST would discard the alternative strategies that
+    # diversity needs (a prolific strategy is often the per-ticker best
+    # everywhere). If the cap leaves slots unfilled, they're backfilled
+    # ticker-unique regardless of strategy — you always get top_k picks
+    # when enough qualify. The candidates table below is unaffected.
     seen_tickers: set[str] = set()
+    strategy_counts: dict[str, int] = {}
     for c in candidates:
-        if c.ticker in seen_tickers:
-            continue
-        seen_tickers.add(c.ticker)
-        result.top.append(c)
         if len(result.top) >= top_k:
             break
+        if c.ticker in seen_tickers:
+            continue
+        if strategy_counts.get(c.strategy_name, 0) >= max_per_strategy:
+            continue
+        result.top.append(c)
+        seen_tickers.add(c.ticker)
+        strategy_counts[c.strategy_name] = strategy_counts.get(c.strategy_name, 0) + 1
+    if len(result.top) < top_k:
+        for c in candidates:
+            if len(result.top) >= top_k:
+                break
+            if c.ticker in seen_tickers:
+                continue
+            result.top.append(c)
+            seen_tickers.add(c.ticker)
 
     # --- 6. rationale (pro/contra factors + news) — only for the final
     # top-K, so news fetching stays at max top_k API calls ---
