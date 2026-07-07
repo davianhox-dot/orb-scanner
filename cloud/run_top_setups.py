@@ -34,8 +34,11 @@ logger = logging.getLogger(__name__)
 
 
 def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
     try:
-        return float(os.environ.get(name, default))
+        return float(raw)
     except ValueError:
         return default
 
