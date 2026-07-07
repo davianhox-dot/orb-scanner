@@ -73,8 +73,8 @@ else:
 # --- 2 · Universe ---
 st.subheader("2 · Universe")
 u1, u2, u3, u4 = st.columns(4)
-min_price = u1.number_input("Min price ($)", min_value=0.5, value=2.0, step=0.5)
-max_price = u2.number_input("Max price ($)", min_value=1.0, value=100.0, step=5.0)
+min_price = u1.number_input("Min price ($)", min_value=0.01, value=0.10, step=0.10, format="%.2f")
+max_price = u2.number_input("Max price ($)", min_value=1.0, value=10000.0, step=100.0)
 top_n = u3.number_input(f"Universe size (top-N by $ volume, max {MAX_UNIVERSE})", min_value=10, max_value=MAX_UNIVERSE, value=150, step=10)
 history_bars = u4.number_input("History (trading days)", min_value=40, max_value=250, value=100, step=10)
 
@@ -82,7 +82,9 @@ st.caption(
     "The scanner ranks all US stocks in your price band by dollar volume and scans the top N. "
     "That's a deliberate choice, not a shortcut: thinly-traded names are exactly where "
     "backtest fills are least realistic. Each additional history day costs one API call, so "
-    "~100 days ≈ ~100 calls ≈ 1-2 minutes."
+    "~100 days ≈ ~100 calls ≈ 1-2 minutes. **Important:** the history must cover your "
+    "strategy's longest indicator — e.g. an EMA200 trend filter needs 220+ trading days of "
+    "history, otherwise no signal can ever fire (the EMA Pullback preset uses EMA200)."
 )
 
 if not settings.POLYGON_API_KEY:
