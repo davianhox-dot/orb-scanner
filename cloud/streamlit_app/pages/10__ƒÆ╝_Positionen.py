@@ -155,7 +155,6 @@ else:
                     st.success(c.message)
                 else:
                     st.warning(c.message)
-            st.rerun() if False else None  # results shown; table below refreshes on next interaction
 
     for pos in open_positions:
         with st.container(border=True):
