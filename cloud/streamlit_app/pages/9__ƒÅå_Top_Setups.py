@@ -119,7 +119,10 @@ def _render_regime(regime: dict | None) -> None:
     elif status == "yellow":
         st.warning(text)
     else:
-        st.success(text) if status == "green" else st.caption(text)
+        if status == "green":
+            st.success(text)
+        else:
+            st.caption(text)
 
 
 def _render_strategy_stats(stats: list | None) -> None:
@@ -428,15 +431,20 @@ else:
 st.subheader("Manuell scannen")
 
 u1, u2, u3, u4 = st.columns(4)
-min_price = u1.number_input("Min price ($)", min_value=0.5, value=2.0, step=0.5)
-max_price = u2.number_input("Max price ($)", min_value=1.0, value=100.0, step=5.0)
-top_n = u3.number_input(f"Universe (top-N, max {MAX_UNIVERSE})", min_value=10, max_value=MAX_UNIVERSE, value=150, step=10)
+min_price = u1.number_input("Min price ($)", min_value=0.01, value=0.10, step=0.10, format="%.2f")
+max_price = u2.number_input("Max price ($)", min_value=1.0, value=10000.0, step=100.0)
+top_n = u3.number_input(f"Universe (top-N, max {MAX_UNIVERSE})", min_value=10, max_value=MAX_UNIVERSE, value=400, step=10)
 history_bars = u4.number_input("History (trading days)", min_value=40, max_value=250, value=250, step=10)
 
-s1, s2, s3 = st.columns(3)
+s1, s2, s3, s4 = st.columns(4)
 backtest_years = s1.selectbox("Auto-Backtest über", [1, 2, 3], index=1, format_func=lambda y: f"{y} Jahr(e)")
 min_trades = s2.number_input("Min. historische Trades", min_value=1, max_value=50, value=5)
 top_k = s3.selectbox("Wie viele Top-Setups", [1, 2, 3], index=2)
+max_per_strategy = s4.selectbox(
+    "Max. pro Strategie in den Top", [1, 2, 3], index=0,
+    help="Erzwingt Vielfalt: bei 1 kann keine einzelne Strategie alle Top-Plätze fluten. "
+         "Bleiben Plätze frei, werden sie mit den nächstbesten Setups aufgefüllt — egal welcher Strategie.",
+)
 
 with Session() as db:
     saved_rows = db.execute(select(SavedStrategy).order_by(SavedStrategy.name)).scalars().all()
@@ -500,6 +508,7 @@ if st.button("🏆 Top Setups finden", type="primary"):
                     result = find_top_setups(
                         db, settings, strategies, bars_by_ticker,
                         backtest_years=int(backtest_years), min_trades=int(min_trades), top_k=int(top_k),
+                        max_per_strategy=int(max_per_strategy),
                         spy_bars=spy_bars,
                         progress_callback=lambda msg: progress_line.write(msg),
                     )
