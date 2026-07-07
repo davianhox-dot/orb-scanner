@@ -49,13 +49,14 @@ def run() -> int:
         logger.error("POLYGON_API_KEY not set — the top-setups job needs live market data.")
         return 1
 
-    min_price = _env_float("TOPSETUPS_MIN_PRICE", 2.0)
-    max_price = _env_float("TOPSETUPS_MAX_PRICE", 100.0)
-    universe_n = int(_env_float("TOPSETUPS_UNIVERSE", 150))
+    min_price = _env_float("TOPSETUPS_MIN_PRICE", 0.10)
+    max_price = _env_float("TOPSETUPS_MAX_PRICE", 10000.0)
+    universe_n = int(_env_float("TOPSETUPS_UNIVERSE", 400))
     history_bars = int(_env_float("TOPSETUPS_HISTORY_BARS", 250))
     backtest_years = int(_env_float("TOPSETUPS_BACKTEST_YEARS", 2))
     min_trades = int(_env_float("TOPSETUPS_MIN_TRADES", 5))
     top_k = int(_env_float("TOPSETUPS_TOP_K", 3))
+    max_per_strategy = int(_env_float("TOPSETUPS_MAX_PER_STRATEGY", 1))
 
     init_db(settings)
     Session = get_session_factory(settings)
@@ -94,6 +95,7 @@ def run() -> int:
         result = find_top_setups(
             db, settings, strategies, bars_by_ticker,
             backtest_years=backtest_years, min_trades=min_trades, top_k=top_k,
+            max_per_strategy=max_per_strategy,
             spy_bars=spy_bars,
             progress_callback=lambda msg: logger.info(msg),
         )
