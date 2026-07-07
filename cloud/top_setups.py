@@ -154,8 +154,17 @@ def find_top_setups(
     # Applied to copies; saved strategies/presets themselves stay untouched.
     import copy as _copy
     import os as _os
-    _slip = float(_os.environ.get("TOPSETUPS_SLIPPAGE_PCT", 0.1))
-    _comm = float(_os.environ.get("TOPSETUPS_COMMISSION", 1.0))
+    def _env_num(name: str, default: float) -> float:
+        raw = _os.environ.get(name)
+        if raw is None or not str(raw).strip():
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            return default
+
+    _slip = _env_num("TOPSETUPS_SLIPPAGE_PCT", 0.1)
+    _comm = _env_num("TOPSETUPS_COMMISSION", 1.0)
     costed: list[tuple[str, StrategyConfig]] = []
     for _name, _cfg in strategies:
         _c = _copy.deepcopy(_cfg)
