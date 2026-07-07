@@ -38,7 +38,7 @@ from cloud.strategy_rules import IndicatorCache, evaluate_all
 logger = logging.getLogger(__name__)
 BASE_URL = "https://api.polygon.io"
 
-MAX_UNIVERSE = 500
+MAX_UNIVERSE = 1000
 
 
 @dataclass
