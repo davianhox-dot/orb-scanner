@@ -12,11 +12,27 @@ from zoneinfo import ZoneInfo
 
 
 def _env_float(name: str, default: float) -> float:
-    return float(os.environ.get(name, default))
+    """Robust float from env: GitHub Actions passes MISSING secrets as
+    EMPTY strings (not unset), so '' and garbage must fall back to the
+    default instead of crashing the whole job."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def _env_int(name: str, default: int) -> int:
-    return int(os.environ.get(name, default))
+    """Robust int from env — same empty-secret handling as _env_float."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -39,6 +55,10 @@ class Settings:
     ALPACA_API_SECRET: str = field(default_factory=lambda: os.environ.get("ALPACA_API_SECRET", ""))
     TWELVEDATA_API_KEY: str = field(default_factory=lambda: os.environ.get("TWELVEDATA_API_KEY", ""))
     ALLOW_MOCK_DATA_FALLBACK: bool = field(default_factory=lambda: _env_bool("ALLOW_MOCK_DATA_FALLBACK", True))
+
+    # --- AI chat (Top Setups page) — either key enables the per-stock chat ---
+    ANTHROPIC_API_KEY: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
+    OPENAI_API_KEY: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
 
     # --- Scan schedule ---
     SCAN_TIMES: tuple[str, ...] = ("08:00", "08:30", "09:00", "09:20", "09:28")
