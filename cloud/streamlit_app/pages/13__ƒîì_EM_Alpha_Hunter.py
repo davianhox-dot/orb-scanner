@@ -121,7 +121,8 @@ st.subheader("Schritt 2 — Filter")
 f1, f2, f3, f4 = st.columns(4)
 mcap_min = f1.number_input("Market Cap min ($ Mio)", min_value=50.0, value=500.0, step=50.0)
 mcap_max = f2.number_input("Market Cap max ($ Mrd)", min_value=1.0, value=15.0, step=1.0)
-top_n = f3.number_input("Kandidaten für Tiefenanalyse", min_value=5, max_value=50, value=20, step=5)
+top_n = f3.number_input("Kandidaten für Tiefenanalyse", min_value=5, max_value=500, value=20, step=5)
+scan_all = f3.checkbox("Alle im Filter analysieren", help="Ignoriert die Zahl oben und analysiert JEDEN Kandidaten im Größenband — 2 Abrufe pro Firma, bei hunderten Kandidaten entsprechend Minuten.")
 all_countries = sorted(EM_COUNTRY_TERMS.keys())
 sel_countries = f4.multiselect("Länder (leer = alle EM)", all_countries, default=[])
 
@@ -132,13 +133,16 @@ if st.button("🌍 Alpha-Suche starten", type="primary"):
         st.stop()
     with Session() as db:
         rows = shortlist(db, mcap_min=mcap_min * 1e6, mcap_max=mcap_max * 1e9,
-                         countries=sel_countries or None, top_n=int(top_n))
+                         countries=sel_countries or None,
+                         top_n=None if scan_all else int(top_n))
     if not rows:
         st.warning(
             "Keine Kandidaten im Filter — vermutlich ist das Universum noch nicht aufgebaut "
             "(Schritt 1: erst ①, dann ② bis vollständig, dann ③)."
         )
         st.stop()
+    if len(rows) > 100:
+        st.warning(f"{len(rows)} Kandidaten — das dauert einige Minuten (2 Abrufe pro Firma). Seite offen lassen.")
     bar = st.progress(0.0, text=f"Tiefenanalyse von {len(rows)} Kandidaten (Finanzberichte + News je Ticker)…")
     with Session() as db:
         cands = analyze_candidates(
