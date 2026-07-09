@@ -186,6 +186,26 @@ class OptimizationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class EMCompany(Base):
+    """Cached universe of US-listed foreign companies (ADRs) for the
+    Emerging-Markets Alpha Hunter. Details (market cap, description,
+    inferred home country) are fetched once and cached here, because
+    enriching ~1-2k tickers costs one API call each."""
+
+    __tablename__ = "em_companies"
+
+    ticker: Mapped[str] = mapped_column(String(16), primary_key=True)
+    name: Mapped[str] = mapped_column(String(256), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    market_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    country: Mapped[str] = mapped_column(String(64), default="")  # heuristically inferred
+    sic_description: Mapped[str] = mapped_column(String(256), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    last_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dollar_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    details_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AppSetting(Base):
     """Tiny key-value store for user-level settings (e.g. account size for
     the position-size calculator) — a new table on purpose, since adding
