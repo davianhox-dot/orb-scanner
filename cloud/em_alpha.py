@@ -216,7 +216,7 @@ def attach_dollar_volume(db: Session, settings: Settings) -> int:
 # --------------------------------------------------------------------- #
 
 def shortlist(db: Session, mcap_min: float, mcap_max: float,
-              countries: list[str] | None = None, top_n: int = 25) -> list[EMCompany]:
+              countries: list[str] | None = None, top_n: int | None = 25) -> list[EMCompany]:
     """EM companies in the size band, LEAST-traded first (obscurity proxy).
     Rows without dollar volume or price sort last / are skipped."""
     q = select(EMCompany).where(
@@ -232,7 +232,7 @@ def shortlist(db: Session, mcap_min: float, mcap_max: float,
     if countries:
         rows = [r for r in rows if r.country in countries]
     rows.sort(key=lambda r: r.dollar_volume or 0)
-    return rows[:top_n]
+    return rows if top_n is None else rows[:top_n]
 
 
 def news_count(settings: Settings, ticker: str, days: int = 90) -> int | None:
