@@ -186,6 +186,35 @@ class OptimizationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class USCompany(Base):
+    """Cached universe of US common stocks for the long-term Investor
+    Screener. Quality-scan results are cached on the row (one financials
+    API call per company is expensive — never fetch twice)."""
+
+    __tablename__ = "us_companies"
+
+    ticker: Mapped[str] = mapped_column(String(16), primary_key=True)
+    name: Mapped[str] = mapped_column(String(256), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dollar_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sic_description: Mapped[str] = mapped_column(String(256), default="")
+    details_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Cached quality-scan summary (from the fundamentals engine)
+    quant_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    revenue_cagr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_cagr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    debt_to_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fcf_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    years_covered: Mapped[int] = mapped_column(Integer, default=0)
+    fcf_is_approx: Mapped[bool] = mapped_column(Boolean, default=False)
+    score_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class EMCompany(Base):
     """Cached universe of US-listed foreign companies (ADRs) for the
     Emerging-Markets Alpha Hunter. Details (market cap, description,
